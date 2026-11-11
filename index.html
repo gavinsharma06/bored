@@ -2,30 +2,32 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Bored</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=Bungee&family=Bungee+Shade&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Unbounded:wght@500;700;800&display=swap">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="marquee">
-    <div class="marquee-board">
-      <p class="marquee-kicker">Live from your bedroom</p>
-      <h1 class="marquee-title">Bored</h1>
-      <p class="marquee-sub">The wheel of something to do</p>
+  <div class="spotlight" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">Bored</span>
+      <span class="brand-sub">Late night edition</span>
     </div>
-  </header>
 
-  <main class="stage">
-    <section class="host" aria-live="polite">
-      <p class="host-name">Your host, Buddy Marquee</p>
-      <p class="host-line" id="hostLine"></p>
-    </section>
+    <div class="topbar-controls">
+      <figure class="jar" id="jar">
+        <figcaption class="jar-title">Reels</figcaption>
+        <div class="jar-meter" aria-hidden="true">
+          <div class="jar-fill" id="jarFill"></div>
+        </div>
+        <span class="jar-caption" id="jarCaption"></span>
+      </figure>
 
-    <section class="controls">
-      <div class="moods" id="moods" role="radiogroup" aria-label="Mood">
+      <div class="moods" role="radiogroup" aria-label="Mood">
         <button class="mood" type="button" role="radio" data-mood="fried">Fried</button>
         <button class="mood" type="button" role="radio" data-mood="meh">Meh</button>
         <button class="mood" type="button" role="radio" data-mood="lockedIn">Locked in</button>
@@ -34,50 +36,66 @@
       <label class="toggle">
         <input type="checkbox" id="mysteryToggle">
         <span class="toggle-track" aria-hidden="true"></span>
-        Mystery mode
+        <span class="toggle-label">Mystery</span>
       </label>
 
-      <button class="gear" id="settingsButton" type="button" aria-label="Settings" aria-controls="drawer" aria-expanded="false">⚙</button>
+      <button class="icon-button" id="settingsButton" type="button" aria-label="Settings" aria-controls="drawer" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" /></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <section class="host" aria-live="polite">
+      <p class="host-name">Buddy Marquee, your host</p>
+      <p class="host-line" id="hostLine"></p>
     </section>
 
-    <div class="arena">
-      <div class="wheel-wrap" id="wheelWrap">
-        <div class="bulbs" id="bulbs" aria-hidden="true"></div>
-        <canvas class="wheel" id="wheel" aria-label="Activity wheel"></canvas>
-        <div class="pointer" id="pointer" aria-hidden="true"></div>
-        <div class="hub" aria-hidden="true">★</div>
-        <p class="flash" id="flash" aria-live="assertive" hidden></p>
-      </div>
-
-      <figure class="jar" id="jar">
-        <div class="jar-lid" aria-hidden="true"></div>
-        <div class="jar-glass" aria-hidden="true">
-          <div class="jar-fill" id="jarFill"></div>
-          <span class="jar-label">Reels</span>
-        </div>
-        <figcaption class="jar-caption" id="jarCaption"></figcaption>
-      </figure>
+    <div class="wheel-wrap" id="wheelWrap">
+      <div class="bulbs" id="bulbs" aria-hidden="true"></div>
+      <canvas class="wheel" id="wheel" aria-label="Activity wheel"></canvas>
+      <svg class="pointer" id="pointer" viewBox="0 0 40 56" aria-hidden="true">
+        <defs>
+          <linearGradient id="pointerChrome" x1="0" x2="1">
+            <stop offset="0" stop-color="#6d7078" />
+            <stop offset="0.45" stop-color="#f7f8fa" />
+            <stop offset="1" stop-color="#8b8e96" />
+          </linearGradient>
+        </defs>
+        <path d="M20 54 L4 18 A17 17 0 1 1 36 18 Z" fill="url(#pointerChrome)" stroke="#16171b" stroke-width="2" />
+        <circle class="pointer-gem" cx="20" cy="17" r="6" />
+      </svg>
+      <button class="hub" id="spinButton" type="button">Spin</button>
+      <p class="flash" id="flash" aria-live="assertive" hidden></p>
     </div>
 
-    <button class="spin-button" id="spinButton" type="button">Spin</button>
   </main>
 
   <div class="result" id="result" hidden>
-    <div class="result-card" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
+    <article class="result-card" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
       <p class="result-kicker" id="resultKicker"></p>
-      <div class="result-icon" id="resultIcon"></div>
-      <p class="result-category" id="resultCategory"></p>
-      <h2 class="result-title" id="resultTitle"></h2>
-      <p class="result-minutes" id="resultMinutes"></p>
+      <div class="result-head">
+        <div class="result-icon" id="resultIcon"></div>
+        <div>
+          <p class="result-category" id="resultCategory"></p>
+          <h2 class="result-title" id="resultTitle"></h2>
+        </div>
+      </div>
+      <div class="timer" id="timer" hidden>
+        <span class="timer-clock" id="timerClock"></span>
+        <div class="timer-track" aria-hidden="true"><div class="timer-bar" id="timerBar"></div></div>
+      </div>
       <div class="result-actions" id="resultActions"></div>
-    </div>
+    </article>
   </div>
 
   <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
   <aside class="drawer" id="drawer" aria-label="Settings" hidden>
     <header class="drawer-header">
       <h2>Backstage</h2>
-      <button class="drawer-close" id="drawerClose" type="button" aria-label="Close settings">✕</button>
+      <button class="icon-button" id="drawerClose" type="button" aria-label="Close settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+      </button>
     </header>
 
     <section class="drawer-section">

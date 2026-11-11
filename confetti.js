@@ -1,6 +1,6 @@
 // Hand rolled confetti on a full screen canvas that only exists while pieces are falling.
 const confetti = (() => {
-  const COLORS = ["#f2b631", "#e2412c", "#fff1d2", "#33c3e0", "#e86a92", "#3fa34d"];
+  const COLORS = ["#ffb04a", "#ffe7a3", "#f5f6f8", "#a3a6ad", "#ff8a7a", "#8de6f6"];
   const GRAVITY = 0.32;
   const DRAG = 0.985;
 

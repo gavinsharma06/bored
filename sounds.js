@@ -74,8 +74,10 @@ const sounds = (() => {
     source.stop(at + duration);
   }
 
+  // A wooden clack: a short noise snap plus a quick falling knock underneath it.
   function tick() {
-    tone({ frequency: 1900, duration: 0.03, volume: 0.06 });
+    burst({ at: audio().currentTime, duration: 0.025, volume: 0.22, filterType: "highpass", frequency: 2500 });
+    tone({ frequency: 900, slideTo: 420, type: "triangle", duration: 0.04, volume: 0.1 });
   }
 
   function startDrumroll() {
@@ -165,5 +167,11 @@ const sounds = (() => {
     burst({ at: audio().currentTime, duration: 0.9, volume: 0.08, filterType: "bandpass", frequency: 700 });
   }
 
-  return { tick, startDrumroll, stopDrumroll, crash, fanfare, sadTrombone, horn, soClose };
+  function chime() {
+    [880, 1109, 1319].forEach((frequency, index) => {
+      tone({ frequency, type: "sine", start: index * 0.12, duration: 1.2, volume: 0.12 });
+    });
+  }
+
+  return { tick, startDrumroll, stopDrumroll, crash, fanfare, sadTrombone, horn, soClose, chime };
 })();

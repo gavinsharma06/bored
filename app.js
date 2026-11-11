@@ -1,9 +1,11 @@
 const TAU = Math.PI * 2;
 const QUARTER_TURN = Math.PI / 2;
-const BULB_COUNT = 28;
+const BULB_COUNT = 48;
 const JACKPOT_WEIGHT = 0.45;
-const SPIN_TURNS = 6;
-const SPIN_MS = 5200;
+const SPIN_TURNS = 9;
+const SPIN_MS = 7200;
+const CALM_SPIN_TURNS = 1;
+const CALM_SPIN_MS = 900;
 const REVEAL_DELAY_MS = 900;
 const RESHUFFLE_MS = 300;
 const NEAR_MISS_CHANCE = 0.4;
@@ -18,9 +20,10 @@ const REELS_DAILY_MINUTES = 60;
 const NEGLECT_STEP = 0.25;
 const NEGLECT_MAX_DAYS = 4;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const PENALTY_COLOR = "#6b6461";
+const PENALTY_COLOR = "#3d3c40";
+const JACKPOT_GOLD = ["#8a5a12", "#ffe7a3", "#d99a2b", "#fff3cf", "#9c6716"];
 const STORAGE_PREFIX = "bored.";
-const LABEL_FONT = 'Bungee, Impact, "Arial Black", sans-serif';
+const LABEL_FONT = 'Unbounded, "Arial Black", sans-serif';
 const EMOJI_FONT = '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
 
 const HOST_LINES = {
@@ -96,6 +99,14 @@ const HOST_LINES = {
   ],
   eightBallNo: [
     "The 8 Ball says no. The wheel is locked for 10 minutes. Go stare out a window."
+  ],
+  timerStarted: [
+    "The clock is running. The studio audience holds its breath.",
+    "Timer's on. I'll just be over here, hosting."
+  ],
+  timerDone: [
+    "Time! Did you do it? Be honest, the cameras saw everything.",
+    "That's the buzzer, folks! Done or skip?"
   ]
 };
 
@@ -112,6 +123,7 @@ const state = {
   pointerArc: null,
   spinning: false,
   pending: load("pending", null),
+  timerChimed: false,
   mystery: load("mystery", false),
   hidden: new Set(load("hidden", []))
 };
@@ -129,8 +141,10 @@ const els = {
   resultIcon: document.getElementById("resultIcon"),
   resultCategory: document.getElementById("resultCategory"),
   resultTitle: document.getElementById("resultTitle"),
-  resultMinutes: document.getElementById("resultMinutes"),
   resultActions: document.getElementById("resultActions"),
+  timer: document.getElementById("timer"),
+  timerClock: document.getElementById("timerClock"),
+  timerBar: document.getElementById("timerBar"),
   moodButtons: document.querySelectorAll("[data-mood]"),
   mysteryToggle: document.getElementById("mysteryToggle"),
   settingsButton: document.getElementById("settingsButton"),
@@ -145,16 +159,18 @@ const els = {
 };
 
 const palette = readPalette();
+const calmMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 function readPalette() {
   const styles = getComputedStyle(document.documentElement);
   const read = (name) => styles.getPropertyValue(name).trim();
 
   return {
-    brass: read("--brass"),
-    cream: read("--cream"),
-    tomato: read("--tomato"),
-    ink: read("--ink")
+    accent: read("--accent"),
+    text: read("--text"),
+    ink: read("--ink"),
+    chromeLight: read("--chrome-light"),
+    chromeDark: read("--chrome-dark")
   };
 }
 
@@ -204,6 +220,11 @@ function easeOutCubic(progress) {
   return 1 - (1 - progress) ** 3;
 }
 
+// Starts at full speed and spends most of its time coasting, like a heavy wheel.
+function easeOutQuint(progress) {
+  return 1 - (1 - progress) ** 5;
+}
+
 function easeInOutSine(progress) {
   return (1 - Math.cos(Math.PI * progress)) / 2;
 }
@@ -247,11 +268,12 @@ function drainReels(minutes) {
 
 function renderJar() {
   const left = reelsLeft();
-  els.jarFill.style.height = `${(left / REELS_DAILY_MINUTES) * 100}%`;
+  els.jarFill.style.width = `${(left / REELS_DAILY_MINUTES) * 100}%`;
   els.jar.classList.toggle("is-empty", left === 0);
-  els.jarCaption.textContent = left === 0
-    ? "Jar's empty. Reels are now a penalty."
-    : `${left} of ${REELS_DAILY_MINUTES} min of reels left today`;
+  els.jarCaption.textContent = left === 0 ? "Penalty armed" : `${left} min left`;
+  els.jar.title = left === 0
+    ? "The reels jar is empty. The reels slice is now a 40 minute LeetCode penalty."
+    : `${left} of ${REELS_DAILY_MINUTES} minutes of reels left today`;
 }
 
 // Neglect
@@ -346,32 +368,43 @@ function textColorFor(hex) {
   const blue = value & 255;
   const brightness = (red * 299 + green * 587 + blue * 114) / 1000;
 
-  return brightness > 150 ? palette.ink : palette.cream;
+  return brightness > 150 ? palette.ink : palette.text;
 }
 
-function sliceFill(ctx, slice, radius) {
-  if (slice.kind === "penalty") {
+function jackpotFill(ctx, arc, radius) {
+  const middle = (arc.start + arc.end) / 2 - QUARTER_TURN;
+  const across = middle + QUARTER_TURN;
+  const half = radius * 0.3;
+  const gold = ctx.createLinearGradient(
+    Math.cos(across) * -half,
+    Math.sin(across) * -half,
+    Math.cos(across) * half,
+    Math.sin(across) * half
+  );
+
+  JACKPOT_GOLD.forEach((color, index) => gold.addColorStop(index / (JACKPOT_GOLD.length - 1), color));
+  return gold;
+}
+
+function sliceFill(ctx, arc, radius) {
+  if (arc.slice.kind === "penalty") {
     return PENALTY_COLOR;
   }
 
-  if (slice.kind !== "jackpot") {
-    return slice.category.color;
+  if (arc.slice.kind === "jackpot") {
+    return jackpotFill(ctx, arc, radius);
   }
 
-  const shine = ctx.createRadialGradient(0, 0, radius * 0.2, 0, 0, radius);
-  shine.addColorStop(0, palette.brass);
-  shine.addColorStop(0.75, "#fff3b0");
-  shine.addColorStop(1, palette.brass);
-  return shine;
+  return arc.slice.category.color;
 }
 
 function sliceFace(slice) {
   if (slice.kind === "jackpot") {
-    return { icon: "⭐", label: "Jackpot", color: palette.tomato };
+    return { icon: "⭐", label: "Jackpot", color: palette.ink };
   }
 
   if (slice.kind === "penalty") {
-    return { icon: "😤", label: "Penalty", color: palette.cream };
+    return { icon: "😤", label: "Penalty", color: palette.text };
   }
 
   return {
@@ -412,10 +445,10 @@ function drawSliceFace(ctx, arc, radius) {
 
   const { icon, label, color } = sliceFace(arc.slice);
   const sweep = arc.end - arc.start;
-  const rim = radius * 0.92;
-  const iconSize = Math.min(radius * 0.12, rim * sweep * 0.55);
-  const labelSize = Math.min(radius * 0.065, radius * sweep * 0.3);
-  const labelEnd = rim - iconSize * 1.3;
+  const rim = radius * 0.9;
+  const iconSize = Math.min(radius * 0.1, rim * sweep * 0.5);
+  const labelSize = Math.min(radius * 0.044, radius * sweep * 0.26);
+  const labelEnd = rim - iconSize * 1.35;
 
   ctx.save();
   ctx.rotate((arc.start + arc.end) / 2 - QUARTER_TURN);
@@ -425,9 +458,9 @@ function drawSliceFace(ctx, arc, radius) {
   ctx.font = `${iconSize}px ${EMOJI_FONT}`;
   ctx.fillText(icon, rim, 0);
 
-  ctx.font = `${labelSize}px ${LABEL_FONT}`;
+  ctx.font = `600 ${labelSize}px ${LABEL_FONT}`;
   ctx.fillStyle = color;
-  ctx.fillText(fitText(ctx, label.toUpperCase(), labelEnd - radius * 0.22), labelEnd, 0);
+  ctx.fillText(fitText(ctx, label.toUpperCase(), labelEnd - radius * 0.24), labelEnd, 0);
   ctx.restore();
 }
 
@@ -436,13 +469,65 @@ function drawSlice(ctx, arc, radius) {
   ctx.moveTo(0, 0);
   ctx.arc(0, 0, radius, arc.start - QUARTER_TURN, arc.end - QUARTER_TURN);
   ctx.closePath();
-  ctx.fillStyle = sliceFill(ctx, arc.slice, radius);
+  ctx.fillStyle = sliceFill(ctx, arc, radius);
   ctx.fill();
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = palette.ink;
-  ctx.stroke();
+}
 
-  drawSliceFace(ctx, arc, radius);
+// Two strokes per divider, dark then light, read as a bevelled chrome strip.
+function drawDividers(ctx, radius) {
+  state.arcs.forEach((arc) => {
+    const angle = arc.start - QUARTER_TURN;
+    const x = Math.cos(angle) * radius;
+    const y = Math.sin(angle) * radius;
+
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(x, y);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.stroke();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
+    ctx.stroke();
+  });
+}
+
+// Darkens the hub and the rim, then lays a soft sheen over the top left.
+function drawShading(ctx, radius) {
+  const depth = ctx.createRadialGradient(0, 0, radius * 0.15, 0, 0, radius);
+  depth.addColorStop(0, "rgba(0, 0, 0, 0.45)");
+  depth.addColorStop(0.35, "rgba(0, 0, 0, 0)");
+  depth.addColorStop(0.85, "rgba(0, 0, 0, 0.08)");
+  depth.addColorStop(1, "rgba(0, 0, 0, 0.5)");
+
+  const sheen = ctx.createLinearGradient(-radius, -radius, radius * 0.4, radius * 0.4);
+  sheen.addColorStop(0, "rgba(255, 255, 255, 0.14)");
+  sheen.addColorStop(0.5, "rgba(255, 255, 255, 0)");
+
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, TAU);
+  ctx.fillStyle = depth;
+  ctx.fill();
+  ctx.fillStyle = sheen;
+  ctx.fill();
+}
+
+function drawPegs(ctx, radius) {
+  const pegRadius = Math.max(radius * 0.014, 2.5);
+
+  state.arcs.forEach((arc) => {
+    const angle = arc.start - QUARTER_TURN;
+    const x = Math.cos(angle) * radius * 0.955;
+    const y = Math.sin(angle) * radius * 0.955;
+    const shine = ctx.createRadialGradient(x - pegRadius / 3, y - pegRadius / 3, 0, x, y, pegRadius);
+    shine.addColorStop(0, palette.chromeLight);
+    shine.addColorStop(1, palette.chromeDark);
+
+    ctx.beginPath();
+    ctx.arc(x, y, pegRadius, 0, TAU);
+    ctx.fillStyle = shine;
+    ctx.fill();
+  });
 }
 
 function drawWheel() {
@@ -457,6 +542,10 @@ function drawWheel() {
   const ctx = canvas.getContext("2d");
   ctx.setTransform(pixelRatio, 0, 0, pixelRatio, radius * pixelRatio, radius * pixelRatio);
   state.arcs.forEach((arc) => drawSlice(ctx, arc, radius));
+  drawShading(ctx, radius);
+  drawDividers(ctx, radius);
+  state.arcs.forEach((arc) => drawSliceFace(ctx, arc, radius));
+  drawPegs(ctx, radius);
 }
 
 function renderBulbs() {
@@ -477,10 +566,20 @@ function arcUnderPointer() {
   return state.arcs.find((arc) => pointerAngle >= arc.start && pointerAngle < arc.end) ?? state.arcs[0];
 }
 
-function flickPointer() {
+// A peg knocks the pointer aside and it springs back with a small overshoot.
+function bouncePointer() {
+  if (calmMotion.matches) {
+    return;
+  }
+
   els.pointer.animate(
-    [{ transform: "rotate(-22deg)" }, { transform: "rotate(0deg)" }],
-    { duration: 140, easing: "ease-out" }
+    [
+      { transform: "rotate(0deg)" },
+      { transform: "rotate(-12deg)", offset: 0.25 },
+      { transform: "rotate(3deg)", offset: 0.65 },
+      { transform: "rotate(0deg)" }
+    ],
+    { duration: 180, easing: "ease-out" }
   );
 }
 
@@ -493,7 +592,7 @@ function setRotation(rotation) {
   if (arc !== state.pointerArc) {
     state.pointerArc = arc;
     sounds.tick();
-    flickPointer();
+    bouncePointer();
   }
 }
 
@@ -557,7 +656,7 @@ function showFlash(text) {
 async function teaseJackpot(arcs, winnerArc) {
   const jackpotArc = arcs.find((arc) => arc.slice.kind === "jackpot");
 
-  await turnWheel(rotationToLand(jackpotArc, 0.6, SPIN_TURNS), SPIN_MS, easeOutCubic);
+  await turnWheel(rotationToLand(jackpotArc, 0.6, SPIN_TURNS), SPIN_MS, easeOutQuint);
   sounds.stopDrumroll();
   setHostLine("tease");
   await wait(TEASE_PAUSE_MS);
@@ -581,7 +680,7 @@ async function spin() {
   sounds.startDrumroll();
 
   const winner = pickWeightedSlice();
-  const nearMiss = winner.kind !== "jackpot" && Math.random() < NEAR_MISS_CHANCE;
+  const nearMiss = winner.kind !== "jackpot" && !calmMotion.matches && Math.random() < NEAR_MISS_CHANCE;
   const arcs = layoutArcs(arrangeSlices(winner, nearMiss));
   const winnerArc = arcs.find((arc) => arc.slice === winner);
 
@@ -590,8 +689,10 @@ async function spin() {
 
   if (nearMiss) {
     await teaseJackpot(arcs, winnerArc);
+  } else if (calmMotion.matches) {
+    await turnWheel(rotationToLand(winnerArc, 0.5, CALM_SPIN_TURNS), CALM_SPIN_MS, easeOutCubic);
   } else {
-    await turnWheel(rotationToLand(winnerArc, randomBetween(0.2, 0.8), SPIN_TURNS), SPIN_MS, easeOutCubic);
+    await turnWheel(rotationToLand(winnerArc, randomBetween(0.2, 0.8), SPIN_TURNS), SPIN_MS, easeOutQuint);
   }
 
   sounds.stopDrumroll();
@@ -606,10 +707,19 @@ function lockRemaining() {
   return Math.max(load("lockedUntil", 0) - Date.now(), 0);
 }
 
+function spinButtonLabel(locked) {
+  if (locked > 0) {
+    return formatClock(locked);
+  }
+
+  return state.spinning ? "···" : "Spin";
+}
+
 function updateControls() {
   const locked = lockRemaining();
 
-  els.spinButton.textContent = locked > 0 ? `Locked ${formatClock(locked)}` : "Spin";
+  els.spinButton.textContent = spinButtonLabel(locked);
+  els.spinButton.setAttribute("aria-label", locked > 0 ? `Wheel locked for ${formatClock(locked)}` : "Spin the wheel");
   els.spinButton.disabled = state.spinning || Boolean(state.pending) || locked > 0;
   els.mysteryToggle.disabled = state.spinning;
   els.moodButtons.forEach((button) => {
@@ -702,27 +812,83 @@ function resultKicker(outcome) {
 }
 
 function actionsFor(outcome) {
-  const skip = { label: "Skipped", status: "skipped", style: "action-secondary" };
+  const skip = { label: "Skip", style: "action-ghost", run: () => settle("skipped") };
 
   if (outcome.taskId === "magic8Ball") {
     return [
-      { label: "It said yes", status: "done", style: "action-primary", effect: "spinAgain" },
-      { label: "It said no", status: "done", style: "action-primary", effect: "lockWheel" },
+      { label: "It said yes", style: "action-primary", run: () => settle("done", "spinAgain") },
+      { label: "It said no", style: "", run: () => settle("done", "lockWheel") },
       skip
     ];
   }
 
-  return [{ label: "Done", status: "done", style: "action-primary" }, skip];
+  const done = { label: "Done", style: "action-primary", run: () => settle("done") };
+
+  if (!outcome.minutes || outcome.timerEndsAt) {
+    return [done, skip];
+  }
+
+  const timer = { label: `Start ${outcome.minutes} min timer`, style: "action-timer", run: startTimer };
+  return [timer, done, skip];
+}
+
+function renderResultIcon(outcome) {
+  if (outcome.taskId === "magic8Ball") {
+    const ball = document.createElement("div");
+    ball.className = "eight-ball";
+    els.resultIcon.replaceChildren(ball);
+    return;
+  }
+
+  els.resultIcon.textContent = outcome.icon;
+}
+
+// Timer
+
+function startTimer() {
+  state.pending.timerEndsAt = Date.now() + state.pending.minutes * 60 * 1000;
+  state.timerChimed = false;
+  save("pending", state.pending);
+  setHostLine("timerStarted");
+  renderActions(actionsFor(state.pending));
+  renderTimer();
+}
+
+function renderTimer() {
+  const endsAt = state.pending?.timerEndsAt;
+  els.timer.hidden = !endsAt;
+
+  if (!endsAt) {
+    return;
+  }
+
+  const total = state.pending.minutes * 60 * 1000;
+  const left = Math.max(endsAt - Date.now(), 0);
+  els.timerClock.textContent = left > 0 ? formatClock(left) : "Time";
+  els.timerBar.style.width = `${(left / total) * 100}%`;
+  els.timer.classList.toggle("is-finished", left === 0);
+
+  if (left === 0 && !state.timerChimed) {
+    state.timerChimed = true;
+    sounds.chime();
+    setHostLine("timerDone");
+  }
+}
+
+function everySecond() {
+  updateControls();
+  renderTimer();
 }
 
 function showResult(outcome) {
   els.resultKicker.textContent = resultKicker(outcome);
-  els.resultIcon.textContent = outcome.icon;
+  renderResultIcon(outcome);
   els.resultCategory.textContent = outcome.kind === "jackpot" ? "Guilt free treat unlocked" : outcome.categoryName;
   els.resultTitle.textContent = outcome.text;
-  els.resultMinutes.textContent = outcome.minutes ? `${outcome.minutes} min` : "No timer";
   els.result.dataset.kind = outcome.kind;
   renderActions(actionsFor(outcome));
+  state.timerChimed = Boolean(outcome.timerEndsAt) && outcome.timerEndsAt <= Date.now();
+  renderTimer();
 
   els.result.hidden = false;
   updateControls();
@@ -730,12 +896,12 @@ function showResult(outcome) {
 }
 
 function renderActions(actions) {
-  const buttons = actions.map(({ label, status, style, effect }) => {
+  const buttons = actions.map(({ label, style, run }) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `action-button ${style}`;
+    button.className = ["action-button", style].filter(Boolean).join(" ");
     button.textContent = label;
-    button.addEventListener("click", () => settle(status, effect));
+    button.addEventListener("click", run);
     return button;
   });
 
@@ -920,7 +1086,7 @@ function init() {
   refreshWheel();
   updateControls();
   bindControls();
-  setInterval(updateControls, 1000);
+  setInterval(everySecond, 1000);
 
   // Canvas text does not repaint when web fonts arrive, so draw again once they do.
   document.fonts.ready.then(drawWheel);
