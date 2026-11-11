@@ -18,6 +18,11 @@ const HISTORY_LIMIT = 500;
 const HISTORY_SHOWN = 30;
 const REELS_DAILY_MINUTES = 60;
 const NEGLECT_STEP = 0.25;
+const LEARNING_STEP = 0.15;
+const LEARNING_FLOOR = 0.35;
+const LEARNING_CEILING = 2;
+const TOP_TASKS_SHOWN = 5;
+const ALWAYS_SKIPPED_MIN = 2;
 const NEGLECT_MAX_DAYS = 4;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PENALTY_COLOR = "#3d3c40";
@@ -153,6 +158,8 @@ const els = {
   drawerClose: document.getElementById("drawerClose"),
   taskToggles: document.getElementById("taskToggles"),
   history: document.getElementById("history"),
+  topTasks: document.getElementById("topTasks"),
+  skippedTasks: document.getElementById("skippedTasks"),
   jar: document.getElementById("jar"),
   jarFill: document.getElementById("jarFill"),
   jarCaption: document.getElementById("jarCaption")
@@ -191,6 +198,16 @@ function save(key, value) {
 
 function pickRandom(list) {
   return list[Math.floor(Math.random() * list.length)];
+}
+
+function pickWeighted(list, weightOf) {
+  const totalWeight = list.reduce((sum, item) => sum + weightOf(item), 0);
+  let roll = Math.random() * totalWeight;
+
+  return list.find((item) => {
+    roll -= weightOf(item);
+    return roll <= 0;
+  }) ?? list[list.length - 1];
 }
 
 function randomBetween(min, max) {
@@ -288,6 +305,32 @@ function categoryWeight(category) {
   return 1 + idleDays * NEGLECT_STEP;
 }
 
+// Learning
+
+function taskStats() {
+  const stats = new Map();
+
+  load("history", []).forEach((entry) => {
+    if (entry.kind !== "task") {
+      return;
+    }
+
+    const stat = stats.get(entry.taskId) ?? { label: entry.label, icon: entry.icon, done: 0, skipped: 0 };
+    stat[entry.status] += 1;
+    stats.set(entry.taskId, stat);
+  });
+
+  return stats;
+}
+
+// Every Done nudges a task up and every Skip nudges it down, within a floor and a
+// ceiling so a task you keep skipping still turns up now and then.
+function taskWeight(task, stats) {
+  const stat = stats.get(task.id);
+  const score = stat ? stat.done - stat.skipped : 0;
+  return Math.min(Math.max(1 + score * LEARNING_STEP, LEARNING_FLOOR), LEARNING_CEILING);
+}
+
 function markCategoryDone(categoryId) {
   const lastDone = load("lastDone", {});
   lastDone[categoryId] = new Date().toISOString();
@@ -304,21 +347,21 @@ function eligibleTasks(categoryId) {
   ));
 }
 
-function sliceFor(category, tasks) {
-  const weight = categoryWeight(category);
-
+function sliceFor(category, tasks, stats) {
   if (category.id === "reels" && reelsLeft() === 0) {
-    return { kind: "penalty", category, task: PENALTY_TASK, weight };
+    return { kind: "penalty", category, task: PENALTY_TASK, weight: categoryWeight(category) };
   }
 
-  return { kind: "task", category, task: pickRandom(tasks), weight };
+  const task = pickWeighted(tasks, (candidate) => taskWeight(candidate, stats));
+  return { kind: "task", category, task, weight: categoryWeight(category) * taskWeight(task, stats) };
 }
 
 function buildSlices() {
+  const stats = taskStats();
   const taskSlices = CATEGORIES
     .map((category) => ({ category, tasks: eligibleTasks(category.id) }))
     .filter(({ tasks }) => tasks.length > 0)
-    .map(({ category, tasks }) => sliceFor(category, tasks));
+    .map(({ category, tasks }) => sliceFor(category, tasks, stats));
 
   return [...taskSlices, { kind: "jackpot", weight: JACKPOT_WEIGHT }];
 }
@@ -597,13 +640,7 @@ function setRotation(rotation) {
 }
 
 function pickWeightedSlice() {
-  const totalWeight = state.slices.reduce((sum, slice) => sum + slice.weight, 0);
-  let roll = Math.random() * totalWeight;
-
-  return state.slices.find((slice) => {
-    roll -= slice.weight;
-    return roll <= 0;
-  }) ?? state.slices[state.slices.length - 1];
+  return pickWeighted(state.slices, (slice) => slice.weight);
 }
 
 // Rotating the wheel clockwise moves the pointer backwards through the angles,
@@ -1045,8 +1082,49 @@ function renderHistoryEntry(entry) {
   return item;
 }
 
+function renderRankEntry({ icon, label }, detail) {
+  const item = document.createElement("li");
+  const name = document.createElement("span");
+  const count = document.createElement("span");
+
+  name.textContent = label;
+  count.className = "rank-count";
+  count.textContent = detail;
+  item.append(icon, name, count);
+  return item;
+}
+
+function renderRankList(list, entries, emptyText) {
+  if (entries.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "rank-empty";
+    empty.textContent = emptyText;
+    list.replaceChildren(empty);
+    return;
+  }
+
+  list.replaceChildren(...entries);
+}
+
+function renderLearning() {
+  const stats = [...taskStats().values()];
+  const topTasks = stats
+    .filter((stat) => stat.done > 0)
+    .sort((first, second) => second.done - first.done || first.skipped - second.skipped)
+    .slice(0, TOP_TASKS_SHOWN)
+    .map((stat) => renderRankEntry(stat, `${stat.done} done`));
+  const skippedTasks = stats
+    .filter((stat) => stat.done === 0 && stat.skipped >= ALWAYS_SKIPPED_MIN)
+    .sort((first, second) => second.skipped - first.skipped)
+    .map((stat) => renderRankEntry(stat, `${stat.skipped} skips`));
+
+  renderRankList(els.topTasks, topTasks, "Finish a few tasks and your favourites show up here.");
+  renderRankList(els.skippedTasks, skippedTasks, "Nothing you keep dodging. Suspicious, but nice.");
+}
+
 function openDrawer() {
   renderTaskToggles();
+  renderLearning();
   renderHistory();
   els.drawer.hidden = false;
   els.drawerBackdrop.hidden = false;
