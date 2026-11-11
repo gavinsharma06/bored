@@ -14,7 +14,13 @@ locally, serve the folder:
 python -m http.server 8000
 ```
 
-Then open <http://localhost:8000>. On GitHub Pages it all just works.
+Then open <http://localhost:8000>.
+
+## On your phone
+
+GitHub Pages serves the app from the root of `main`, so it works on any device
+and picks up new ideas as soon as they're pushed. `.nojekyll` tells Pages
+to serve the files as they are, without a Jekyll build.
 
 ## Files
 
@@ -44,6 +50,10 @@ calls. To sync, create a fine grained GitHub token limited to this repository
 with **Contents: Read and write**, then paste it into the drawer's Sync section.
 The token lives only in that browser's localStorage. Failed syncs retry on the
 next load.
+
+Every GitHub Pages site you own shares the `owner.github.io` origin, so they
+share localStorage too. Any of your other Pages sites could read this token, so
+keep it scoped to this one repository and Contents only.
 
 ## The forge report
 
