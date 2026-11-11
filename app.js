@@ -1050,11 +1050,7 @@ function setTaskHidden(taskId, hidden) {
   }
 
   storage.save("hidden", [...state.hidden]);
-
-  // Never swap slices out from under a spinning wheel; the next round picks this up.
-  if (!state.spinning) {
-    refreshWheel();
-  }
+  refreshWheelWhenIdle();
 }
 
 // Drawer
@@ -1187,10 +1183,7 @@ function unbenchTask(taskId) {
   syncHistory();
   setHostLine("unbenched");
   renderLearning();
-
-  if (!state.spinning) {
-    refreshWheel();
-  }
+  refreshWheelWhenIdle();
 }
 
 // History sync
@@ -1240,7 +1233,16 @@ function forgetSyncToken() {
 async function catchUpHistory() {
   await logbook.pullPublished();
   await syncHistory();
+  refreshWheelWhenIdle();
+}
 
+async function loadIdeas() {
+  state.tasks = ideas.apply(TASKS, await ideas.fetchIdeas());
+  refreshWheelWhenIdle();
+}
+
+// Never swap slices out from under a spinning wheel; the next round picks it up.
+function refreshWheelWhenIdle() {
   if (!state.spinning) {
     refreshWheel();
   }
@@ -1302,6 +1304,7 @@ function init() {
     showResult(state.pending);
   }
 
+  loadIdeas();
   catchUpHistory();
 }
 
