@@ -21,7 +21,7 @@ function loadAppScripts(history) {
   const storage = { load: (key, fallback) => (key === "history" ? history : fallback), save() {}, remove() {} };
   const context = vm.createContext({ storage, location: { hostname: "", pathname: "/" }, console });
 
-  for (const file of ["tasks.js", "ideas.js", "history.js"]) {
+  for (const file of ["tasks.example.js", "ideas.js", "history.js"]) {
     vm.runInContext(readFileSync(join(root, file), "utf8"), context, { filename: file });
   }
 

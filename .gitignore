@@ -1,0 +1,11 @@
+# Personal data lives in a separate private repo. Keep any local copies out of here.
+tasks.js
+tasks.json
+profile.js
+profile.json
+history.json
+ideas.json
+
+# Local backups and secrets
+*.bundle
+.env
