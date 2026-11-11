@@ -14,8 +14,8 @@ const CREEP_MS = 1500;
 const NEAR_MISS_PAUSE_MS = 900;
 const EIGHT_BALL_LOCK_MS = 10 * 60 * 1000;
 const EIGHT_BALL_RESPIN_MS = 1400;
-const HISTORY_LIMIT = 500;
 const HISTORY_SHOWN = 30;
+const BENCH_STREAK = 10;
 const REELS_DAILY_MINUTES = 60;
 const NEGLECT_STEP = 0.25;
 const LEARNING_STEP = 0.15;
@@ -27,7 +27,6 @@ const NEGLECT_MAX_DAYS = 4;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PENALTY_COLOR = "#3d3c40";
 const JACKPOT_GOLD = ["#8a5a12", "#ffe7a3", "#d99a2b", "#fff3cf", "#9c6716"];
-const STORAGE_PREFIX = "bored.";
 const LABEL_FONT = 'Unbounded, "Arial Black", sans-serif';
 const EMOJI_FONT = '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
 
@@ -102,6 +101,10 @@ const HOST_LINES = {
   eightBallYes: [
     "The 8 Ball says spin again! Who am I to argue?"
   ],
+  unbenched: [
+    "Back in the game! The crowd goes mild.",
+    "Off the bench and onto the wheel. Don't make me regret this."
+  ],
   eightBallNo: [
     "The 8 Ball says no. The wheel is locked for 10 minutes. Go stare out a window."
   ],
@@ -121,16 +124,17 @@ const KICKERS = {
 };
 
 const state = {
+  tasks: TASKS,
   mood: "meh",
   slices: [],
   arcs: [],
   rotation: 0,
   pointerArc: null,
   spinning: false,
-  pending: load("pending", null),
+  pending: storage.load("pending", null),
   timerChimed: false,
-  mystery: load("mystery", false),
-  hidden: new Set(load("hidden", []))
+  mystery: storage.load("mystery", false),
+  hidden: new Set(storage.load("hidden", []))
 };
 
 const els = {
@@ -160,6 +164,7 @@ const els = {
   history: document.getElementById("history"),
   topTasks: document.getElementById("topTasks"),
   skippedTasks: document.getElementById("skippedTasks"),
+  benchedTasks: document.getElementById("benchedTasks"),
   jar: document.getElementById("jar"),
   jarFill: document.getElementById("jarFill"),
   jarCaption: document.getElementById("jarCaption")
@@ -182,19 +187,6 @@ function readPalette() {
 }
 
 // Helpers
-
-function load(key, fallback) {
-  try {
-    const raw = localStorage.getItem(STORAGE_PREFIX + key);
-    return raw === null ? fallback : JSON.parse(raw);
-  } catch {
-    return fallback;
-  }
-}
-
-function save(key, value) {
-  localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
-}
 
 function pickRandom(list) {
   return list[Math.floor(Math.random() * list.length)];
@@ -272,14 +264,14 @@ function setHostLine(moment) {
 // Reels jar
 
 function reelsLeft() {
-  const jar = load("reels", null);
+  const jar = storage.load("reels", null);
   const usedToday = jar && jar.day === todayKey() ? jar.minutesUsed : 0;
   return Math.max(REELS_DAILY_MINUTES - usedToday, 0);
 }
 
 function drainReels(minutes) {
   const used = REELS_DAILY_MINUTES - reelsLeft() + minutes;
-  save("reels", { day: todayKey(), minutesUsed: used });
+  storage.save("reels", { day: todayKey(), minutesUsed: used });
   renderJar();
 }
 
@@ -293,15 +285,58 @@ function renderJar() {
     : `${left} of ${REELS_DAILY_MINUTES} minutes of reels left today`;
 }
 
+// Tasks
+
+function findTask(taskId) {
+  return state.tasks.find((task) => task.id === taskId);
+}
+
+function findCategory(categoryId) {
+  return CATEGORIES.find((category) => category.id === categoryId);
+}
+
+// History only stores ids, so names and icons are looked up when shown.
+function describeTask(taskId) {
+  const task = findTask(taskId);
+
+  if (task) {
+    return { icon: findCategory(task.category).icon, label: task.label };
+  }
+
+  if (taskId === "jackpot") {
+    return { icon: "⭐", label: "Jackpot" };
+  }
+
+  if (taskId === PENALTY_TASK.id) {
+    return { icon: "😤", label: "Penalty" };
+  }
+
+  return { icon: "·", label: taskId };
+}
+
 // Neglect
 
-function categoryWeight(category) {
+function lastDoneByCategory() {
+  const lastDone = new Map();
+
+  logbook.entries().forEach(({ taskId, result, date }) => {
+    const task = findTask(taskId);
+
+    if (task && result === "done") {
+      lastDone.set(task.category, date);
+    }
+  });
+
+  return lastDone;
+}
+
+function categoryWeight(category, lastDone) {
   if (category.ignoresNeglect) {
     return 1;
   }
 
-  const lastDone = load("lastDone", {})[category.id];
-  const idleDays = lastDone ? Math.min(daysSince(lastDone), NEGLECT_MAX_DAYS) : NEGLECT_MAX_DAYS;
+  const doneAt = lastDone.get(category.id);
+  const idleDays = doneAt ? Math.min(daysSince(doneAt), NEGLECT_MAX_DAYS) : NEGLECT_MAX_DAYS;
   return 1 + idleDays * NEGLECT_STEP;
 }
 
@@ -310,17 +345,22 @@ function categoryWeight(category) {
 function taskStats() {
   const stats = new Map();
 
-  load("history", []).forEach((entry) => {
-    if (entry.kind !== "task") {
+  logbook.entries().forEach(({ taskId, result }) => {
+    if (!findTask(taskId) || result === "unbenched") {
       return;
     }
 
-    const stat = stats.get(entry.taskId) ?? { label: entry.label, icon: entry.icon, done: 0, skipped: 0 };
-    stat[entry.status] += 1;
-    stats.set(entry.taskId, stat);
+    const stat = stats.get(taskId) ?? { ...describeTask(taskId), done: 0, skipped: 0 };
+    stat[result] += 1;
+    stats.set(taskId, stat);
   });
 
   return stats;
+}
+
+function benchedTasks() {
+  const streaks = logbook.skipStreaks();
+  return state.tasks.filter((task) => (streaks.get(task.id) ?? 0) >= BENCH_STREAK);
 }
 
 // Every Done nudges a task up and every Skip nudges it down, within a floor and a
@@ -331,37 +371,35 @@ function taskWeight(task, stats) {
   return Math.min(Math.max(1 + score * LEARNING_STEP, LEARNING_FLOOR), LEARNING_CEILING);
 }
 
-function markCategoryDone(categoryId) {
-  const lastDone = load("lastDone", {});
-  lastDone[categoryId] = new Date().toISOString();
-  save("lastDone", lastDone);
-}
-
 // Slices
 
-function eligibleTasks(categoryId) {
-  return TASKS.filter((task) => (
+function eligibleTasks(categoryId, benched) {
+  return state.tasks.filter((task) => (
     task.category === categoryId &&
     task.moods.includes(state.mood) &&
-    !state.hidden.has(task.id)
+    !state.hidden.has(task.id) &&
+    !benched.has(task.id)
   ));
 }
 
-function sliceFor(category, tasks, stats) {
+function sliceFor(category, tasks, learning) {
+  const weight = categoryWeight(category, learning.lastDone);
+
   if (category.id === "reels" && reelsLeft() === 0) {
-    return { kind: "penalty", category, task: PENALTY_TASK, weight: categoryWeight(category) };
+    return { kind: "penalty", category, task: PENALTY_TASK, weight };
   }
 
-  const task = pickWeighted(tasks, (candidate) => taskWeight(candidate, stats));
-  return { kind: "task", category, task, weight: categoryWeight(category) * taskWeight(task, stats) };
+  const task = pickWeighted(tasks, (candidate) => taskWeight(candidate, learning.stats));
+  return { kind: "task", category, task, weight: weight * taskWeight(task, learning.stats) };
 }
 
 function buildSlices() {
-  const stats = taskStats();
+  const learning = { stats: taskStats(), lastDone: lastDoneByCategory() };
+  const benched = new Set(benchedTasks().map((task) => task.id));
   const taskSlices = CATEGORIES
-    .map((category) => ({ category, tasks: eligibleTasks(category.id) }))
+    .map((category) => ({ category, tasks: eligibleTasks(category.id, benched) }))
     .filter(({ tasks }) => tasks.length > 0)
-    .map(({ category, tasks }) => sliceFor(category, tasks, stats));
+    .map(({ category, tasks }) => sliceFor(category, tasks, learning));
 
   return [...taskSlices, { kind: "jackpot", weight: JACKPOT_WEIGHT }];
 }
@@ -741,7 +779,7 @@ async function spin() {
 }
 
 function lockRemaining() {
-  return Math.max(load("lockedUntil", 0) - Date.now(), 0);
+  return Math.max(storage.load("lockedUntil", 0) - Date.now(), 0);
 }
 
 function spinButtonLabel(locked) {
@@ -806,7 +844,7 @@ function outcomeFor(slice) {
 
 function announce(outcome) {
   state.pending = { ...outcome, spunAt: new Date().toISOString() };
-  save("pending", state.pending);
+  storage.save("pending", state.pending);
 
   sounds.crash();
   celebrate(outcome);
@@ -885,7 +923,7 @@ function renderResultIcon(outcome) {
 function startTimer() {
   state.pending.timerEndsAt = Date.now() + state.pending.minutes * 60 * 1000;
   state.timerChimed = false;
-  save("pending", state.pending);
+  storage.save("pending", state.pending);
   setHostLine("timerStarted");
   renderActions(actionsFor(state.pending));
   renderTimer();
@@ -952,22 +990,15 @@ function applyEffect(effect) {
   }
 
   if (effect === "lockWheel") {
-    save("lockedUntil", Date.now() + EIGHT_BALL_LOCK_MS);
+    storage.save("lockedUntil", Date.now() + EIGHT_BALL_LOCK_MS);
     setHostLine("eightBallNo");
   }
 }
 
 function settle(status, effect) {
-  const history = load("history", []);
-  history.push({ ...state.pending, status, loggedAt: new Date().toISOString() });
-  save("history", history.slice(-HISTORY_LIMIT));
-
-  if (status === "done" && state.pending.kind === "task") {
-    markCategoryDone(state.pending.categoryId);
-  }
-
+  logbook.record(state.pending.taskId ?? state.pending.kind, status);
   state.pending = null;
-  save("pending", null);
+  storage.save("pending", null);
   els.result.hidden = true;
   setHostLine(status);
   refreshWheel();
@@ -997,7 +1028,7 @@ function renderMoods() {
 
 function setMystery(enabled) {
   state.mystery = enabled;
-  save("mystery", enabled);
+  storage.save("mystery", enabled);
   drawWheel();
 
   if (enabled) {
@@ -1012,7 +1043,7 @@ function setTaskHidden(taskId, hidden) {
     state.hidden.delete(taskId);
   }
 
-  save("hidden", [...state.hidden]);
+  storage.save("hidden", [...state.hidden]);
 
   // Never swap slices out from under a spinning wheel; the next round picks this up.
   if (!state.spinning) {
@@ -1030,7 +1061,7 @@ function renderTaskToggles() {
     legend.textContent = `${category.icon} ${category.name}`;
     group.append(legend);
 
-    TASKS.filter((task) => task.category === category.id).forEach((task) => {
+    state.tasks.filter((task) => task.category === category.id).forEach((task) => {
       group.append(renderTaskToggle(task));
     });
 
@@ -1053,7 +1084,7 @@ function renderTaskToggle(task) {
 }
 
 function renderHistory() {
-  const entries = load("history", []).slice(-HISTORY_SHOWN).reverse();
+  const entries = logbook.entries().slice(-HISTORY_SHOWN).reverse();
 
   if (entries.length === 0) {
     const empty = document.createElement("li");
@@ -1072,12 +1103,13 @@ function renderHistoryEntry(entry) {
   const time = document.createElement("time");
   const status = document.createElement("span");
 
-  icon.textContent = entry.icon;
-  time.dateTime = entry.loggedAt;
-  time.textContent = new Date(entry.loggedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
-  details.append(entry.label, time);
-  status.className = `history-status ${entry.status}`;
-  status.textContent = entry.status;
+  const { icon: taskIcon, label } = describeTask(entry.taskId);
+  icon.textContent = taskIcon;
+  time.dateTime = entry.date;
+  time.textContent = new Date(entry.date).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  details.append(label, time);
+  status.className = `history-status ${entry.result}`;
+  status.textContent = entry.result;
   item.append(icon, details, status);
   return item;
 }
@@ -1120,6 +1152,38 @@ function renderLearning() {
 
   renderRankList(els.topTasks, topTasks, "Finish a few tasks and your favourites show up here.");
   renderRankList(els.skippedTasks, skippedTasks, "Nothing you keep dodging. Suspicious, but nice.");
+  renderBenched();
+}
+
+function renderBenchedEntry(task) {
+  const item = document.createElement("li");
+  const icon = document.createElement("span");
+  const name = document.createElement("span");
+  const unbench = document.createElement("button");
+
+  icon.textContent = findCategory(task.category).icon;
+  name.textContent = task.label;
+  unbench.type = "button";
+  unbench.className = "unbench-button";
+  unbench.textContent = "Unbench";
+  unbench.addEventListener("click", () => unbenchTask(task.id));
+  item.append(icon, name, unbench);
+  return item;
+}
+
+function renderBenched() {
+  const entries = benchedTasks().map(renderBenchedEntry);
+  renderRankList(els.benchedTasks, entries, `Skip a task ${BENCH_STREAK} times in a row and it sits out here.`);
+}
+
+function unbenchTask(taskId) {
+  logbook.record(taskId, "unbenched");
+  setHostLine("unbenched");
+  renderLearning();
+
+  if (!state.spinning) {
+    refreshWheel();
+  }
 }
 
 function openDrawer() {
@@ -1156,6 +1220,7 @@ function bindControls() {
 }
 
 function init() {
+  logbook.migrate();
   renderBulbs();
   renderJar();
   renderMoods();
