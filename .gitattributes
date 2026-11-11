@@ -1,1 +1,7 @@
 * text eol=lf
+
+# Binary files must never have their line endings touched.
+*.woff2 binary
+*.png binary
+*.jpg binary
+*.ico binary
