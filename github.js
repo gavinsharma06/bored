@@ -3,7 +3,7 @@
 // it never goes in a URL, a log line, or an error message.
 const githubApi = (() => {
   const API = "https://api.github.com";
-  const DEFAULT_REPO = "Demented-Diablo/bored-data";
+  const DEFAULT_REPO = "gavinsharma06/bored-data";
   const REPO_PATTERN = /^[\w.-]+\/[\w.-]+$/;
 
   function settings() {
