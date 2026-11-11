@@ -30,9 +30,23 @@
       <div class="pointer" id="pointer" aria-hidden="true"></div>
       <div class="hub" aria-hidden="true">★</div>
     </div>
+
+    <button class="spin-button" id="spinButton" type="button">Spin</button>
   </main>
 
+  <div class="result" id="result" hidden>
+    <div class="result-card" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
+      <p class="result-kicker" id="resultKicker"></p>
+      <div class="result-icon" id="resultIcon"></div>
+      <p class="result-category" id="resultCategory"></p>
+      <h2 class="result-title" id="resultTitle"></h2>
+      <p class="result-minutes" id="resultMinutes"></p>
+      <div class="result-actions" id="resultActions"></div>
+    </div>
+  </div>
+
   <script src="tasks.js"></script>
+  <script src="sounds.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
