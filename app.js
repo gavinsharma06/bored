@@ -704,7 +704,7 @@ function resultKicker(outcome) {
 function actionsFor(outcome) {
   const skip = { label: "Skipped", status: "skipped", style: "action-secondary" };
 
-  if (outcome.categoryId === "chaos") {
+  if (outcome.taskId === "magic8Ball") {
     return [
       { label: "It said yes", status: "done", style: "action-primary", effect: "spinAgain" },
       { label: "It said no", status: "done", style: "action-primary", effect: "lockWheel" },
