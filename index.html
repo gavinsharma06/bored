@@ -16,6 +16,7 @@
     <div class="brand">
       <span class="brand-mark">Bored</span>
       <span class="brand-sub">Late night edition</span>
+      <span class="demo-badge" id="demoBadge" title="Showing example tasks. Add a token in the drawer to load your own." hidden>Demo mode</span>
     </div>
 
     <div class="topbar-controls">
@@ -99,11 +100,11 @@
     </header>
 
     <section class="drawer-section">
-      <h3>Sync</h3>
+      <h3>Your data</h3>
       <p class="drawer-note">
-        Optional. A fine grained GitHub token for this repo only, with Contents
-        read and write, lets every Done and Skip land in history.json. It stays
-        in this browser's localStorage and is never committed.
+        Optional. A fine grained GitHub token limited to your data repo, with
+        Contents read and write, loads your own tasks and saves every Done and
+        Skip to its history.json. The token stays in this browser's localStorage.
       </p>
       <form class="sync-form" id="syncForm" autocomplete="off">
         <label class="field-label" for="syncRepo">Repository</label>
@@ -149,8 +150,10 @@
 
   <script src="tasks.example.js"></script>
   <script src="storage.js"></script>
+  <script src="github.js"></script>
   <script src="history.js"></script>
   <script src="ideas.js"></script>
+  <script src="data.js"></script>
   <script src="sounds.js"></script>
   <script src="confetti.js"></script>
   <script src="app.js"></script>

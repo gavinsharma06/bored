@@ -123,7 +123,9 @@ const KICKERS = {
 };
 
 const state = {
-  tasks: TASKS,
+  data: null,
+  dataStatus: "loading",
+  tasks: [],
   mood: "meh",
   slices: [],
   arcs: [],
@@ -164,6 +166,7 @@ const els = {
   topTasks: document.getElementById("topTasks"),
   skippedTasks: document.getElementById("skippedTasks"),
   benchedTasks: document.getElementById("benchedTasks"),
+  demoBadge: document.getElementById("demoBadge"),
   syncForm: document.getElementById("syncForm"),
   syncRepo: document.getElementById("syncRepo"),
   syncToken: document.getElementById("syncToken"),
@@ -296,7 +299,7 @@ function findTask(taskId) {
 }
 
 function findCategory(categoryId) {
-  return CATEGORIES.find((category) => category.id === categoryId);
+  return state.data.categories.find((category) => category.id === categoryId);
 }
 
 // History only stores ids, so names and icons are looked up when shown.
@@ -311,7 +314,7 @@ function describeTask(taskId) {
     return { icon: "⭐", label: "Jackpot" };
   }
 
-  if (taskId === PENALTY_TASK.id) {
+  if (taskId === state.data.penaltyTask.id) {
     return { icon: "😤", label: "Penalty" };
   }
 
@@ -390,7 +393,7 @@ function sliceFor(category, tasks, learning) {
   const weight = categoryWeight(category, learning.lastDone);
 
   if (category.id === "reels" && reelsLeft() === 0) {
-    return { kind: "penalty", category, task: PENALTY_TASK, weight };
+    return { kind: "penalty", category, task: state.data.penaltyTask, weight };
   }
 
   const task = pickWeighted(tasks, (candidate) => taskWeight(candidate, learning.stats));
@@ -400,7 +403,7 @@ function sliceFor(category, tasks, learning) {
 function buildSlices() {
   const learning = { stats: taskStats(), lastDone: lastDoneByCategory() };
   const benched = new Set(benchedTasks().map((task) => task.id));
-  const taskSlices = CATEGORIES
+  const taskSlices = state.data.categories
     .map((category) => ({ category, tasks: eligibleTasks(category.id, benched) }))
     .filter(({ tasks }) => tasks.length > 0)
     .map(({ category, tasks }) => sliceFor(category, tasks, learning));
@@ -441,7 +444,9 @@ function showArcs(arcs) {
 }
 
 function refreshWheel() {
-  showArcs(layoutArcs(buildSlices()));
+  if (state.data) {
+    showArcs(layoutArcs(buildSlices()));
+  }
 }
 
 // Drawing
@@ -791,7 +796,7 @@ function spinButtonLabel(locked) {
     return formatClock(locked);
   }
 
-  return state.spinning ? "···" : "Spin";
+  return state.spinning || !state.data ? "···" : "Spin";
 }
 
 function updateControls() {
@@ -799,7 +804,7 @@ function updateControls() {
 
   els.spinButton.textContent = spinButtonLabel(locked);
   els.spinButton.setAttribute("aria-label", locked > 0 ? `Wheel locked for ${formatClock(locked)}` : "Spin the wheel");
-  els.spinButton.disabled = state.spinning || Boolean(state.pending) || locked > 0;
+  els.spinButton.disabled = state.spinning || !state.data || Boolean(state.pending) || locked > 0;
   els.mysteryToggle.disabled = state.spinning;
   els.moodButtons.forEach((button) => {
     button.disabled = state.spinning;
@@ -816,7 +821,7 @@ function outcomeFor(slice) {
       categoryId: "jackpot",
       categoryName: "Jackpot",
       label: "Jackpot",
-      text: pickRandom(TREATS),
+      text: pickRandom(state.data.treats),
       minutes: null
     };
   }
@@ -1055,7 +1060,7 @@ function setTaskHidden(taskId, hidden) {
 // Drawer
 
 function renderTaskToggles() {
-  const groups = CATEGORIES.map((category) => {
+  const groups = state.data.categories.map((category) => {
     const group = document.createElement("fieldset");
     const legend = document.createElement("legend");
     group.className = "toggle-group";
@@ -1185,59 +1190,92 @@ function unbenchTask(taskId) {
   refreshWheelWhenIdle();
 }
 
-// History sync
+// Your data
 
-const SYNC_MESSAGES = {
-  off: "No token, so history stays on this device. Everything still works.",
-  queued: "Waiting to sync. Retries on the next load.",
-  synced: "Synced to history.json."
-};
+function dataMessage() {
+  const { repo } = githubApi.settings();
+  const queued = logbook.syncState() === "queued";
 
-function renderSyncStatus() {
-  els.syncStatus.textContent = SYNC_MESSAGES[logbook.syncState()];
+  switch (state.dataStatus) {
+    case "loading":
+      return `Loading ${repo}…`;
+    case "live":
+      return queued ? `Loaded from ${repo}. History syncs on the next load.` : `Loaded from ${repo}. History is synced.`;
+    case "cached":
+      return `Can't reach ${repo}, so this is your last saved copy. History syncs once it's back.`;
+    case "unreachable":
+      return `Can't reach ${repo}. Showing example tasks until it's back.`;
+    case "badRepo":
+      return "The repository should look like owner/name.";
+    default:
+      return "Demo mode: example tasks, and history stays on this device.";
+  }
 }
 
-function renderSyncSettings() {
-  const { token, repo } = logbook.settings();
+function renderDataStatus() {
+  els.syncStatus.textContent = dataMessage();
+  els.demoBadge.hidden = logbook.syncState() !== "off" || state.dataStatus === "loading";
+}
+
+function renderDataSettings() {
+  const { token, repo } = githubApi.settings();
   els.syncRepo.value = repo;
   els.syncToken.value = "";
   els.syncToken.placeholder = token ? "Token saved. Paste a new one to replace it." : "github_pat_…";
   els.syncForget.hidden = !token;
-  renderSyncStatus();
+  renderDataStatus();
 }
 
 async function syncHistory() {
   await logbook.sync();
-  renderSyncStatus();
+  renderDataStatus();
 }
 
-function saveSyncSettings(event) {
+// Loads tasks and ideas, picks the matching history, then redraws everything.
+async function loadData() {
+  state.dataStatus = "loading";
+  renderDataStatus();
+
+  const loaded = await dataSource.load();
+  state.data = loaded.data;
+  state.dataStatus = loaded.status;
+  state.tasks = ideas.apply(loaded.data.tasks, loaded.ideas, loaded.data.categories);
+  logbook.useMode(loaded.mode);
+
+  renderDataStatus();
+  refreshWheelWhenIdle();
+  updateControls();
+
+  if (!els.drawer.hidden) {
+    renderDrawerLists();
+  }
+
+  if (loaded.mode === "private") {
+    syncHistory();
+  }
+}
+
+function saveDataSettings(event) {
   event.preventDefault();
-  const { token } = logbook.settings();
+  const repo = els.syncRepo.value.trim();
 
-  logbook.saveSettings({
-    repo: els.syncRepo.value.trim(),
-    token: els.syncToken.value.trim() || token
-  });
-  renderSyncSettings();
-  syncHistory();
+  if (!githubApi.isValidRepo(repo)) {
+    state.dataStatus = "badRepo";
+    renderDataStatus();
+    return;
+  }
+
+  githubApi.saveSettings({ repo, token: els.syncToken.value.trim() || githubApi.settings().token });
+  renderDataSettings();
+  loadData();
 }
 
-function forgetSyncToken() {
-  logbook.forgetToken();
-  renderSyncSettings();
-}
-
-// Another device may have logged results, so the wheel and drawer redraw afterwards.
-async function catchUpHistory() {
-  await logbook.pullPublished();
-  await syncHistory();
-  refreshWheelWhenIdle();
-}
-
-async function loadIdeas() {
-  state.tasks = ideas.apply(TASKS, await ideas.fetchIdeas());
-  refreshWheelWhenIdle();
+// Forgetting the token also drops the cached copy of the private tasks.
+function forgetToken() {
+  githubApi.forgetToken();
+  dataSource.forgetCache();
+  renderDataSettings();
+  loadData();
 }
 
 // Never swap slices out from under a spinning wheel; the next round picks it up.
@@ -1247,11 +1285,19 @@ function refreshWheelWhenIdle() {
   }
 }
 
-function openDrawer() {
-  renderSyncSettings();
+function renderDrawerLists() {
   renderTaskToggles();
   renderLearning();
   renderHistory();
+}
+
+function openDrawer() {
+  renderDataSettings();
+
+  if (state.data) {
+    renderDrawerLists();
+  }
+
   els.drawer.hidden = false;
   els.drawerBackdrop.hidden = false;
   els.settingsButton.setAttribute("aria-expanded", "true");
@@ -1271,8 +1317,8 @@ function bindControls() {
   els.settingsButton.addEventListener("click", openDrawer);
   els.drawerClose.addEventListener("click", closeDrawer);
   els.drawerBackdrop.addEventListener("click", closeDrawer);
-  els.syncForm.addEventListener("submit", saveSyncSettings);
-  els.syncForget.addEventListener("click", forgetSyncToken);
+  els.syncForm.addEventListener("submit", saveDataSettings);
+  els.syncForget.addEventListener("click", forgetToken);
   els.moodButtons.forEach((button) => {
     button.addEventListener("click", () => setMood(button.dataset.mood));
   });
@@ -1290,7 +1336,6 @@ function init() {
   renderMoods();
   els.mysteryToggle.checked = state.mystery;
   setHostLine("idle");
-  refreshWheel();
   updateControls();
   bindControls();
   setInterval(everySecond, 1000);
@@ -1299,12 +1344,12 @@ function init() {
   document.fonts.ready.then(drawWheel);
   window.addEventListener("resize", drawWheel);
 
-  if (state.pending) {
-    showResult(state.pending);
-  }
-
-  loadIdeas();
-  catchUpHistory();
+  // A result left open before a reload waits for the data, so Done lands in the right history.
+  loadData().then(() => {
+    if (state.pending) {
+      showResult(state.pending);
+    }
+  });
 }
 
 init();

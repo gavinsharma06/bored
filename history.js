@@ -1,17 +1,23 @@
 // The logbook of every Done, Skip, and Unbench. Entries stay minimal, just
-// { taskId, result, date }, because they end up in a public repo.
+// { taskId, result, date }. Demo mode keeps its own log so example tasks never
+// mix with real history, and only the real log syncs to the data repo.
 const logbook = (() => {
   const LIMIT = 2000;
   const BENCH_STREAK = 10;
   const RESULTS = ["done", "skipped", "unbenched"];
   const FILE = "history.json";
-  const GITHUB_API = "https://api.github.com";
+  const KEYS = { demo: "demoHistory", private: "history" };
 
+  let mode = "demo";
   let syncing = null;
   let syncAgain = false;
 
+  function useMode(nextMode) {
+    mode = nextMode;
+  }
+
   function entries() {
-    return storage.load("history", []);
+    return storage.load(KEYS[mode], []);
   }
 
   function entryKey(entry) {
@@ -37,17 +43,20 @@ const logbook = (() => {
   }
 
   function replace(merged) {
-    storage.save("history", merged);
+    storage.save(KEYS[mode], merged);
   }
 
   function record(taskId, result) {
     replace(merge(entries(), [{ taskId, result, date: new Date().toISOString() }]));
-    storage.save("historyUnsynced", true);
+
+    if (mode === "private") {
+      storage.save("historyUnsynced", true);
+    }
   }
 
   // Earlier versions stored the whole result card plus a separate lastDone map.
   function migrate() {
-    const stored = storage.load("history", []);
+    const stored = storage.load(KEYS.private, []);
 
     if (!stored.some((entry) => "status" in entry)) {
       return;
@@ -61,7 +70,7 @@ const logbook = (() => {
         date: entry.loggedAt
       }));
 
-    replace(merge([], migrated));
+    storage.save(KEYS.private, merge([], migrated));
     storage.save("historyUnsynced", true);
     storage.remove("lastDone");
   }
@@ -77,51 +86,12 @@ const logbook = (() => {
     return streaks;
   }
 
-  // Sync settings
-
-  // On GitHub Pages the address is owner.github.io/repo/, so the repo can be guessed.
-  function guessRepo() {
-    const [owner] = location.hostname.split(".github.io");
-    const [repo] = location.pathname.split("/").filter(Boolean);
-    return location.hostname.endsWith(".github.io") && repo ? `${owner}/${repo}` : "";
-  }
-
-  function settings() {
-    return {
-      token: storage.load("githubToken", ""),
-      repo: storage.load("githubRepo", "") || guessRepo()
-    };
-  }
-
-  function saveSettings({ token, repo }) {
-    storage.save("githubToken", token);
-    storage.save("githubRepo", repo);
-  }
-
-  function forgetToken() {
-    storage.remove("githubToken");
-  }
-
   function syncState() {
-    const { token, repo } = settings();
-
-    if (!token || !repo) {
+    if (mode !== "private") {
       return "off";
     }
 
     return storage.load("historyUnsynced", false) ? "queued" : "synced";
-  }
-
-  // GitHub Contents API
-
-  function toBase64(text) {
-    const bytes = new TextEncoder().encode(text);
-    return btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""));
-  }
-
-  function fromBase64(encoded) {
-    const binary = atob(encoded.replace(/\s/g, ""));
-    return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
   }
 
   // One entry per line keeps the file readable and the commit diffs small.
@@ -129,81 +99,42 @@ const logbook = (() => {
     return `[\n${list.map((entry) => `  ${JSON.stringify(entry)}`).join(",\n")}\n]\n`;
   }
 
-  async function github(path, { token, method = "GET", body } = {}) {
-    const response = await fetch(`${GITHUB_API}${path}`, {
-      method,
-      cache: "no-store",
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${token}`,
-        "x-github-api-version": "2022-11-28",
-        ...(body ? { "content-type": "application/json" } : {})
-      },
-      body: body ? JSON.stringify(body) : undefined
-    });
-
-    if (!response.ok && response.status !== 404) {
-      const error = new Error(`GitHub answered ${response.status}`);
-      error.status = response.status;
-      throw error;
-    }
-
-    return response.status === 404 ? null : response.json();
-  }
-
-  async function readRemote({ token, repo }) {
-    const file = await github(`/repos/${repo}/contents/${FILE}`, { token });
-    return file ? { list: JSON.parse(fromBase64(file.content)), sha: file.sha } : { list: [], sha: null };
-  }
-
-  async function writeRemote({ token, repo }, list, sha, added) {
-    await github(`/repos/${repo}/contents/${FILE}`, {
-      token,
-      method: "PUT",
-      body: {
-        message: `Log ${added} spin result${added === 1 ? "" : "s"}\n\nSynced from the Bored wheel. Entries hold only a task id, a result, and a date.`,
-        content: toBase64(serialize(list)),
-        ...(sha ? { sha } : {})
-      }
-    });
-  }
-
-  async function pushOnce(config) {
-    const remote = await readRemote(config);
-    const remoteKeys = new Set(remote.list.filter(isEntry).map(entryKey));
+  async function pushOnce() {
+    const remote = await githubApi.readJson(FILE);
+    const remoteList = Array.isArray(remote.value) ? remote.value : [];
+    const remoteKeys = new Set(remoteList.filter(isEntry).map(entryKey));
     const added = entries().filter((entry) => !remoteKeys.has(entryKey(entry))).length;
-    replace(merge(remote.list, entries()));
+    replace(merge(remoteList, entries()));
 
     if (added > 0) {
-      await writeRemote(config, entries(), remote.sha, added);
+      const message = `Log ${added} spin result${added === 1 ? "" : "s"}\n\nSynced from the Bored wheel. Entries hold only a task id, a result, and a date.`;
+      await githubApi.writeText(FILE, serialize(entries()), remote.sha, message);
     }
   }
 
   // A 409 means another device pushed between our read and write, so read again once.
-  async function push(config) {
+  async function push() {
     try {
-      await pushOnce(config);
+      await pushOnce();
     } catch (error) {
       if (error.status !== 409) {
         throw error;
       }
 
-      await pushOnce(config);
+      await pushOnce();
     }
   }
 
   async function runSync() {
-    const config = settings();
-
-    if (!config.token || !config.repo) {
+    if (mode !== "private" || !githubApi.isConfigured()) {
       return;
     }
 
     try {
-      await push(config);
+      await push();
       storage.save("historyUnsynced", false);
     } catch (error) {
-      console.warn("History sync failed, it will retry on the next load", error);
+      console.warn("History sync failed, it will retry on the next load:", error.message);
     }
   }
 
@@ -225,33 +156,5 @@ const logbook = (() => {
     syncing = null;
   }
 
-  // Reads the copy GitHub Pages serves, so devices without a token still see
-  // what the others logged. Opened from disk the fetch fails, which is fine.
-  async function pullPublished() {
-    try {
-      const response = await fetch(FILE, { cache: "no-store" });
-
-      if (response.ok) {
-        replace(merge(entries(), await response.json()));
-      }
-    } catch {
-      return;
-    }
-  }
-
-  return {
-    BENCH_STREAK,
-    entries,
-    merge,
-    replace,
-    record,
-    migrate,
-    skipStreaks,
-    settings,
-    saveSettings,
-    forgetToken,
-    syncState,
-    sync,
-    pullPublished
-  };
+  return { BENCH_STREAK, useMode, entries, merge, replace, record, migrate, skipStreaks, syncState, sync };
 })();
