@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bored</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=Bungee&family=Bungee+Shade&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="marquee">
+    <div class="marquee-board">
+      <p class="marquee-kicker">Live from your bedroom</p>
+      <h1 class="marquee-title">Bored</h1>
+      <p class="marquee-sub">The wheel of something to do</p>
+    </div>
+  </header>
+
+  <main class="stage">
+    <section class="host" aria-live="polite">
+      <p class="host-name">Your host, Buddy Marquee</p>
+      <p class="host-line" id="hostLine"></p>
+    </section>
+
+    <div class="wheel-wrap" id="wheelWrap">
+      <div class="bulbs" id="bulbs" aria-hidden="true"></div>
+      <canvas class="wheel" id="wheel" aria-label="Activity wheel"></canvas>
+      <div class="pointer" id="pointer" aria-hidden="true"></div>
+      <div class="hub" aria-hidden="true">★</div>
+    </div>
+  </main>
+
+  <script src="tasks.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
