@@ -6,6 +6,7 @@ const SPIN_TURNS = 6;
 const SPIN_MS = 5200;
 const REVEAL_DELAY_MS = 900;
 const HISTORY_LIMIT = 500;
+const HISTORY_SHOWN = 30;
 const STORAGE_PREFIX = "bored.";
 const LABEL_FONT = 'Bungee, Impact, "Arial Black", sans-serif';
 const EMOJI_FONT = '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
@@ -37,6 +38,22 @@ const HOST_LINES = {
     "Skipped. The wheel will remember this.",
     "Bold. Cowardly, but bold.",
     "The audience boos softly, out of respect."
+  ],
+  fried: [
+    "Fried contestant on stage! Easy questions only, folks.",
+    "Brain at 2%. The wheel will be gentle. Mostly."
+  ],
+  meh: [
+    "Meh. The most popular mood on daytime television.",
+    "A meh contestant. Classic. Timeless."
+  ],
+  lockedIn: [
+    "Locked in! Somebody get this person a headset.",
+    "No games, no reels. Only greatness on this wheel."
+  ],
+  mystery: [
+    "Mystery mode! Not even I know what's under there.",
+    "Icons only. Trust the wheel."
   ]
 };
 
@@ -47,7 +64,9 @@ const state = {
   rotation: 0,
   pointerArc: null,
   spinning: false,
-  pending: load("pending", null)
+  pending: load("pending", null),
+  mystery: load("mystery", false),
+  hidden: new Set(load("hidden", []))
 };
 
 const els = {
@@ -63,7 +82,15 @@ const els = {
   resultCategory: document.getElementById("resultCategory"),
   resultTitle: document.getElementById("resultTitle"),
   resultMinutes: document.getElementById("resultMinutes"),
-  resultActions: document.getElementById("resultActions")
+  resultActions: document.getElementById("resultActions"),
+  moodButtons: document.querySelectorAll("[data-mood]"),
+  mysteryToggle: document.getElementById("mysteryToggle"),
+  settingsButton: document.getElementById("settingsButton"),
+  drawer: document.getElementById("drawer"),
+  drawerBackdrop: document.getElementById("drawerBackdrop"),
+  drawerClose: document.getElementById("drawerClose"),
+  taskToggles: document.getElementById("taskToggles"),
+  history: document.getElementById("history")
 };
 
 const palette = readPalette();
@@ -118,7 +145,11 @@ function setHostLine(moment) {
 // Slices
 
 function eligibleTasks(categoryId) {
-  return TASKS.filter((task) => task.category === categoryId && task.moods.includes(state.mood));
+  return TASKS.filter((task) => (
+    task.category === categoryId &&
+    task.moods.includes(state.mood) &&
+    !state.hidden.has(task.id)
+  ));
 }
 
 function buildSlices() {
@@ -195,7 +226,25 @@ function fitText(ctx, text, maxWidth) {
   return fitted === text ? text : `${fitted.trimEnd()}…`;
 }
 
+function drawMysteryFace(ctx, arc, radius) {
+  const sweep = arc.end - arc.start;
+  const iconSize = Math.min(radius * 0.17, radius * sweep * 0.4);
+
+  ctx.save();
+  ctx.rotate((arc.start + arc.end) / 2 - QUARTER_TURN);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `${iconSize}px ${EMOJI_FONT}`;
+  ctx.fillText(sliceFace(arc.slice).icon, radius * 0.66, 0);
+  ctx.restore();
+}
+
 function drawSliceFace(ctx, arc, radius) {
+  if (state.mystery) {
+    drawMysteryFace(ctx, arc, radius);
+    return;
+  }
+
   const { icon, label, color } = sliceFace(arc.slice);
   const sweep = arc.end - arc.start;
   const rim = radius * 0.92;
@@ -327,7 +376,7 @@ async function spin() {
   }
 
   state.spinning = true;
-  updateSpinButton();
+  updateControls();
   setHostLine("spinning");
   els.wheelWrap.classList.add("is-spinning");
   sounds.startDrumroll();
@@ -343,8 +392,12 @@ async function spin() {
   announce(outcomeFor(winner.slice));
 }
 
-function updateSpinButton() {
+function updateControls() {
   els.spinButton.disabled = state.spinning || Boolean(state.pending);
+  els.mysteryToggle.disabled = state.spinning;
+  els.moodButtons.forEach((button) => {
+    button.disabled = state.spinning;
+  });
 }
 
 // Results
@@ -356,6 +409,7 @@ function outcomeFor(slice) {
       icon: "⭐",
       categoryId: "jackpot",
       categoryName: "Jackpot",
+      label: "Jackpot",
       text: pickRandom(TREATS),
       minutes: null
     };
@@ -367,6 +421,7 @@ function outcomeFor(slice) {
     taskId: slice.task.id,
     categoryId: slice.category.id,
     categoryName: slice.category.name,
+    label: slice.task.label,
     text: slice.task.text,
     minutes: slice.task.minutes
   };
@@ -385,7 +440,7 @@ function announce(outcome) {
 }
 
 function showResult(outcome) {
-  els.resultKicker.textContent = "The wheel has spoken";
+  els.resultKicker.textContent = state.mystery ? "The mystery is revealed" : "The wheel has spoken";
   els.resultIcon.textContent = outcome.icon;
   els.resultCategory.textContent = outcome.categoryName;
   els.resultTitle.textContent = outcome.text;
@@ -396,7 +451,7 @@ function showResult(outcome) {
   ]);
 
   els.result.hidden = false;
-  updateSpinButton();
+  updateControls();
   els.resultActions.querySelector("button").focus();
 }
 
@@ -423,16 +478,151 @@ function settle(status) {
   els.result.hidden = true;
   setHostLine(status);
   refreshWheel();
-  updateSpinButton();
+  updateControls();
+}
+
+// Controls
+
+function setMood(mood) {
+  state.mood = mood;
+  renderMoods();
+  setHostLine(mood);
+  refreshWheel();
+}
+
+function renderMoods() {
+  els.moodButtons.forEach((button) => {
+    button.setAttribute("aria-checked", String(button.dataset.mood === state.mood));
+  });
+}
+
+function setMystery(enabled) {
+  state.mystery = enabled;
+  save("mystery", enabled);
+  drawWheel();
+
+  if (enabled) {
+    setHostLine("mystery");
+  }
+}
+
+function setTaskHidden(taskId, hidden) {
+  if (hidden) {
+    state.hidden.add(taskId);
+  } else {
+    state.hidden.delete(taskId);
+  }
+
+  save("hidden", [...state.hidden]);
+
+  // Never swap slices out from under a spinning wheel; the next round picks this up.
+  if (!state.spinning) {
+    refreshWheel();
+  }
+}
+
+// Drawer
+
+function renderTaskToggles() {
+  const groups = CATEGORIES.map((category) => {
+    const group = document.createElement("fieldset");
+    const legend = document.createElement("legend");
+    group.className = "toggle-group";
+    legend.textContent = `${category.icon} ${category.name}`;
+    group.append(legend);
+
+    TASKS.filter((task) => task.category === category.id).forEach((task) => {
+      group.append(renderTaskToggle(task));
+    });
+
+    return group;
+  });
+
+  els.taskToggles.replaceChildren(...groups);
+}
+
+function renderTaskToggle(task) {
+  const label = document.createElement("label");
+  const checkbox = document.createElement("input");
+  label.className = "task-toggle";
+  label.title = task.text;
+  checkbox.type = "checkbox";
+  checkbox.checked = !state.hidden.has(task.id);
+  checkbox.addEventListener("change", () => setTaskHidden(task.id, !checkbox.checked));
+  label.append(checkbox, task.label);
+  return label;
+}
+
+function renderHistory() {
+  const entries = load("history", []).slice(-HISTORY_SHOWN).reverse();
+
+  if (entries.length === 0) {
+    const empty = document.createElement("li");
+    empty.textContent = "Nothing yet. The stage is yours.";
+    els.history.replaceChildren(empty);
+    return;
+  }
+
+  els.history.replaceChildren(...entries.map(renderHistoryEntry));
+}
+
+function renderHistoryEntry(entry) {
+  const item = document.createElement("li");
+  const icon = document.createElement("span");
+  const details = document.createElement("span");
+  const time = document.createElement("time");
+  const status = document.createElement("span");
+
+  icon.textContent = entry.icon;
+  time.dateTime = entry.loggedAt;
+  time.textContent = new Date(entry.loggedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  details.append(entry.label, time);
+  status.className = `history-status ${entry.status}`;
+  status.textContent = entry.status;
+  item.append(icon, details, status);
+  return item;
+}
+
+function openDrawer() {
+  renderTaskToggles();
+  renderHistory();
+  els.drawer.hidden = false;
+  els.drawerBackdrop.hidden = false;
+  els.settingsButton.setAttribute("aria-expanded", "true");
+  els.drawerClose.focus();
+}
+
+function closeDrawer() {
+  els.drawer.hidden = true;
+  els.drawerBackdrop.hidden = true;
+  els.settingsButton.setAttribute("aria-expanded", "false");
+  els.settingsButton.focus();
+}
+
+function bindControls() {
+  els.spinButton.addEventListener("click", spin);
+  els.mysteryToggle.addEventListener("change", () => setMystery(els.mysteryToggle.checked));
+  els.settingsButton.addEventListener("click", openDrawer);
+  els.drawerClose.addEventListener("click", closeDrawer);
+  els.drawerBackdrop.addEventListener("click", closeDrawer);
+  els.moodButtons.forEach((button) => {
+    button.addEventListener("click", () => setMood(button.dataset.mood));
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !els.drawer.hidden) {
+      closeDrawer();
+    }
+  });
 }
 
 function init() {
   renderBulbs();
+  renderMoods();
+  els.mysteryToggle.checked = state.mystery;
   setHostLine("idle");
   refreshWheel();
-  updateSpinButton();
-
-  els.spinButton.addEventListener("click", spin);
+  updateControls();
+  bindControls();
 
   // Canvas text does not repaint when web fonts arrive, so draw again once they do.
   document.fonts.ready.then(drawWheel);
