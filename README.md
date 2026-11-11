@@ -107,3 +107,9 @@ rewrites to `ideas.json`.
 
 Tokens, the Content Security Policy, and the shared `github.io` origin are covered in
 [SECURITY.md](SECURITY.md).
+
+## License
+
+The code is released under the [MIT License](LICENSE). The bundled Unbounded and
+Instrument Sans fonts are under the SIL Open Font License; their license texts are
+in `fonts/`.
