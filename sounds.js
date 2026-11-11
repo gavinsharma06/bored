@@ -116,5 +116,15 @@ const sounds = (() => {
     tone({ frequency: 784, type: "square", start: 0.44, duration: 0.7, volume: 0.06 });
   }
 
-  return { tick, startDrumroll, stopDrumroll, crash, fanfare };
+  function sadTrombone() {
+    const notes = [[392, 370], [370, 349], [349, 330]];
+
+    notes.forEach(([from, to], index) => {
+      tone({ frequency: from, slideTo: to, type: "sawtooth", start: index * 0.45, duration: 0.42, volume: 0.13 });
+    });
+
+    tone({ frequency: 330, slideTo: 262, type: "sawtooth", start: 1.35, duration: 1.2, volume: 0.13 });
+  }
+
+  return { tick, startDrumroll, stopDrumroll, crash, fanfare, sadTrombone };
 })();

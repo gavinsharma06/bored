@@ -7,6 +7,11 @@ const SPIN_MS = 5200;
 const REVEAL_DELAY_MS = 900;
 const HISTORY_LIMIT = 500;
 const HISTORY_SHOWN = 30;
+const REELS_DAILY_MINUTES = 60;
+const NEGLECT_STEP = 0.25;
+const NEGLECT_MAX_DAYS = 4;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const PENALTY_COLOR = "#6b6461";
 const STORAGE_PREFIX = "bored.";
 const LABEL_FONT = 'Bungee, Impact, "Arial Black", sans-serif';
 const EMOJI_FONT = '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
@@ -54,6 +59,15 @@ const HOST_LINES = {
   mystery: [
     "Mystery mode! Not even I know what's under there.",
     "Icons only. Trust the wheel."
+  ],
+  reels: [
+    "Reels! The audience pretends not to judge.",
+    "Ten minutes of scrolling, sponsored by the jar."
+  ],
+  penalty: [
+    "Oh no. Oh no no no. The jar was empty.",
+    "You flew too close to the algorithm.",
+    "Security, please escort this contestant to LeetCode."
   ]
 };
 
@@ -90,7 +104,10 @@ const els = {
   drawerBackdrop: document.getElementById("drawerBackdrop"),
   drawerClose: document.getElementById("drawerClose"),
   taskToggles: document.getElementById("taskToggles"),
-  history: document.getElementById("history")
+  history: document.getElementById("history"),
+  jar: document.getElementById("jar"),
+  jarFill: document.getElementById("jarFill"),
+  jarCaption: document.getElementById("jarCaption")
 };
 
 const palette = readPalette();
@@ -138,8 +155,61 @@ function easeOutCubic(progress) {
   return 1 - (1 - progress) ** 3;
 }
 
+function todayKey() {
+  return new Date().toLocaleDateString("en-CA");
+}
+
+function daysSince(isoDate) {
+  const then = new Date(isoDate).setHours(0, 0, 0, 0);
+  const today = new Date().setHours(0, 0, 0, 0);
+
+  // Rounding absorbs the 23 and 25 hour days around daylight saving changes.
+  return Math.round((today - then) / DAY_MS);
+}
+
 function setHostLine(moment) {
   els.hostLine.textContent = pickRandom(HOST_LINES[moment]);
+}
+
+// Reels jar
+
+function reelsLeft() {
+  const jar = load("reels", null);
+  const usedToday = jar && jar.day === todayKey() ? jar.minutesUsed : 0;
+  return Math.max(REELS_DAILY_MINUTES - usedToday, 0);
+}
+
+function drainReels(minutes) {
+  const used = REELS_DAILY_MINUTES - reelsLeft() + minutes;
+  save("reels", { day: todayKey(), minutesUsed: used });
+  renderJar();
+}
+
+function renderJar() {
+  const left = reelsLeft();
+  els.jarFill.style.height = `${(left / REELS_DAILY_MINUTES) * 100}%`;
+  els.jar.classList.toggle("is-empty", left === 0);
+  els.jarCaption.textContent = left === 0
+    ? "Jar's empty. Reels are now a penalty."
+    : `${left} of ${REELS_DAILY_MINUTES} min of reels left today`;
+}
+
+// Neglect
+
+function categoryWeight(category) {
+  if (category.ignoresNeglect) {
+    return 1;
+  }
+
+  const lastDone = load("lastDone", {})[category.id];
+  const idleDays = lastDone ? Math.min(daysSince(lastDone), NEGLECT_MAX_DAYS) : NEGLECT_MAX_DAYS;
+  return 1 + idleDays * NEGLECT_STEP;
+}
+
+function markCategoryDone(categoryId) {
+  const lastDone = load("lastDone", {});
+  lastDone[categoryId] = new Date().toISOString();
+  save("lastDone", lastDone);
 }
 
 // Slices
@@ -152,11 +222,21 @@ function eligibleTasks(categoryId) {
   ));
 }
 
+function sliceFor(category, tasks) {
+  const weight = categoryWeight(category);
+
+  if (category.id === "reels" && reelsLeft() === 0) {
+    return { kind: "penalty", category, task: PENALTY_TASK, weight };
+  }
+
+  return { kind: "task", category, task: pickRandom(tasks), weight };
+}
+
 function buildSlices() {
   const taskSlices = CATEGORIES
     .map((category) => ({ category, tasks: eligibleTasks(category.id) }))
     .filter(({ tasks }) => tasks.length > 0)
-    .map(({ category, tasks }) => ({ kind: "task", category, task: pickRandom(tasks), weight: 1 }));
+    .map(({ category, tasks }) => sliceFor(category, tasks));
 
   return [...taskSlices, { kind: "jackpot", weight: JACKPOT_WEIGHT }];
 }
@@ -193,6 +273,10 @@ function textColorFor(hex) {
 }
 
 function sliceFill(ctx, slice, radius) {
+  if (slice.kind === "penalty") {
+    return PENALTY_COLOR;
+  }
+
   if (slice.kind !== "jackpot") {
     return slice.category.color;
   }
@@ -207,6 +291,10 @@ function sliceFill(ctx, slice, radius) {
 function sliceFace(slice) {
   if (slice.kind === "jackpot") {
     return { icon: "⭐", label: "Jackpot", color: palette.tomato };
+  }
+
+  if (slice.kind === "penalty") {
+    return { icon: "😤", label: "Penalty", color: palette.cream };
   }
 
   return {
@@ -415,6 +503,19 @@ function outcomeFor(slice) {
     };
   }
 
+  if (slice.kind === "penalty") {
+    return {
+      kind: "penalty",
+      icon: "😤",
+      taskId: slice.task.id,
+      categoryId: "penalty",
+      categoryName: "Penalty",
+      label: slice.task.label,
+      text: slice.task.text,
+      minutes: slice.task.minutes
+    };
+  }
+
   return {
     kind: "task",
     icon: slice.category.icon,
@@ -432,11 +533,28 @@ function announce(outcome) {
   save("pending", state.pending);
 
   sounds.crash();
-  sounds.fanfare();
-  setHostLine("win");
+  celebrate(outcome);
 
   // Let the landing sink in before the card covers the wheel.
   setTimeout(() => showResult(state.pending), REVEAL_DELAY_MS);
+}
+
+function celebrate(outcome) {
+  if (outcome.kind === "penalty") {
+    sounds.sadTrombone();
+    setHostLine("penalty");
+    return;
+  }
+
+  sounds.fanfare();
+
+  if (outcome.categoryId === "reels") {
+    drainReels(outcome.minutes);
+    setHostLine("reels");
+    return;
+  }
+
+  setHostLine("win");
 }
 
 function showResult(outcome) {
@@ -472,6 +590,10 @@ function settle(status) {
   const history = load("history", []);
   history.push({ ...state.pending, status, loggedAt: new Date().toISOString() });
   save("history", history.slice(-HISTORY_LIMIT));
+
+  if (status === "done" && state.pending.kind === "task") {
+    markCategoryDone(state.pending.categoryId);
+  }
 
   state.pending = null;
   save("pending", null);
@@ -617,6 +739,7 @@ function bindControls() {
 
 function init() {
   renderBulbs();
+  renderJar();
   renderMoods();
   els.mysteryToggle.checked = state.mystery;
   setHostLine("idle");

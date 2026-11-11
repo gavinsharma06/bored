@@ -40,11 +40,22 @@
       <button class="gear" id="settingsButton" type="button" aria-label="Settings" aria-controls="drawer" aria-expanded="false">⚙</button>
     </section>
 
-    <div class="wheel-wrap" id="wheelWrap">
-      <div class="bulbs" id="bulbs" aria-hidden="true"></div>
-      <canvas class="wheel" id="wheel" aria-label="Activity wheel"></canvas>
-      <div class="pointer" id="pointer" aria-hidden="true"></div>
-      <div class="hub" aria-hidden="true">★</div>
+    <div class="arena">
+      <div class="wheel-wrap" id="wheelWrap">
+        <div class="bulbs" id="bulbs" aria-hidden="true"></div>
+        <canvas class="wheel" id="wheel" aria-label="Activity wheel"></canvas>
+        <div class="pointer" id="pointer" aria-hidden="true"></div>
+        <div class="hub" aria-hidden="true">★</div>
+      </div>
+
+      <figure class="jar" id="jar">
+        <div class="jar-lid" aria-hidden="true"></div>
+        <div class="jar-glass" aria-hidden="true">
+          <div class="jar-fill" id="jarFill"></div>
+          <span class="jar-label">Reels</span>
+        </div>
+        <figcaption class="jar-caption" id="jarCaption"></figcaption>
+      </figure>
     </div>
 
     <button class="spin-button" id="spinButton" type="button">Spin</button>
