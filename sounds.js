@@ -126,5 +126,44 @@ const sounds = (() => {
     tone({ frequency: 330, slideTo: 262, type: "sawtooth", start: 1.35, duration: 1.2, volume: 0.13 });
   }
 
-  return { tick, startDrumroll, stopDrumroll, crash, fanfare, sadTrombone };
+  function brass({ frequency, start, duration, volume = 0.1 }) {
+    const ctx = audio();
+    const at = ctx.currentTime + start;
+    const oscillator = ctx.createOscillator();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+
+    oscillator.type = "sawtooth";
+    oscillator.frequency.value = frequency;
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(500, at);
+    filter.frequency.exponentialRampToValueAtTime(3200, at + 0.08);
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(volume, at + 0.04);
+    gain.gain.setValueAtTime(volume, at + duration - 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+    oscillator.connect(filter).connect(gain).connect(master);
+    oscillator.start(at);
+    oscillator.stop(at + duration);
+  }
+
+  function horn() {
+    const chord = [523, 659, 784];
+    const pickups = [0, 0.16, 0.32];
+
+    pickups.forEach((start) => {
+      chord.forEach((frequency) => brass({ frequency: frequency / 2, start, duration: 0.13, volume: 0.07 }));
+    });
+
+    chord.forEach((frequency) => brass({ frequency, start: 0.5, duration: 1.8, volume: 0.08 }));
+    brass({ frequency: 1047, start: 0.5, duration: 1.8, volume: 0.05 });
+  }
+
+  function soClose() {
+    tone({ frequency: 520, slideTo: 300, type: "triangle", duration: 0.9, volume: 0.18 });
+    tone({ frequency: 390, slideTo: 225, type: "triangle", duration: 0.9, volume: 0.14 });
+    burst({ at: audio().currentTime, duration: 0.9, volume: 0.08, filterType: "bandpass", frequency: 700 });
+  }
+
+  return { tick, startDrumroll, stopDrumroll, crash, fanfare, sadTrombone, horn, soClose };
 })();

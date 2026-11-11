@@ -5,6 +5,13 @@ const JACKPOT_WEIGHT = 0.45;
 const SPIN_TURNS = 6;
 const SPIN_MS = 5200;
 const REVEAL_DELAY_MS = 900;
+const RESHUFFLE_MS = 300;
+const NEAR_MISS_CHANCE = 0.4;
+const TEASE_PAUSE_MS = 700;
+const CREEP_MS = 1500;
+const NEAR_MISS_PAUSE_MS = 900;
+const EIGHT_BALL_LOCK_MS = 10 * 60 * 1000;
+const EIGHT_BALL_RESPIN_MS = 1400;
 const HISTORY_LIMIT = 500;
 const HISTORY_SHOWN = 30;
 const REELS_DAILY_MINUTES = 60;
@@ -68,7 +75,33 @@ const HOST_LINES = {
     "Oh no. Oh no no no. The jar was empty.",
     "You flew too close to the algorithm.",
     "Security, please escort this contestant to LeetCode."
+  ],
+  tease: [
+    "Wait. Wait. Is it... IS IT?!",
+    "Folks, I can't look. Somebody tell me what's happening.",
+    "Is that... the JACKPOT?!"
+  ],
+  nearMiss: [
+    "SO CLOSE! The audience groans as one.",
+    "One tick! ONE TICK! Unbelievable television.",
+    "The jackpot slips away. It does that."
+  ],
+  jackpot: [
+    "JACKPOT! Ring the bells! Release the confetti!",
+    "I've hosted this show for 40 years and I'm crying.",
+    "Stop the presses! A treat has been unlocked!"
+  ],
+  eightBallYes: [
+    "The 8 Ball says spin again! Who am I to argue?"
+  ],
+  eightBallNo: [
+    "The 8 Ball says no. The wheel is locked for 10 minutes. Go stare out a window."
   ]
+};
+
+const KICKERS = {
+  jackpot: "Jackpot!!!",
+  penalty: "The wheel is disappointed"
 };
 
 const state = {
@@ -86,6 +119,7 @@ const state = {
 const els = {
   wheel: document.getElementById("wheel"),
   wheelWrap: document.getElementById("wheelWrap"),
+  flash: document.getElementById("flash"),
   bulbs: document.getElementById("bulbs"),
   pointer: document.getElementById("pointer"),
   hostLine: document.getElementById("hostLine"),
@@ -151,8 +185,34 @@ function modulo(value, divisor) {
   return ((value % divisor) + divisor) % divisor;
 }
 
+function shuffle(list) {
+  const shuffled = [...list];
+
+  for (let index = shuffled.length - 1; index > 0; index--) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+
+  return shuffled;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function easeOutCubic(progress) {
   return 1 - (1 - progress) ** 3;
+}
+
+function easeInOutSine(progress) {
+  return (1 - Math.cos(Math.PI * progress)) / 2;
+}
+
+function formatClock(ms) {
+  const totalSeconds = Math.ceil(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, "0");
+  return `${minutes}:${seconds}`;
 }
 
 function todayKey() {
@@ -254,10 +314,27 @@ function layoutArcs(slices) {
   });
 }
 
-function refreshWheel() {
-  state.slices = buildSlices();
-  state.arcs = layoutArcs(state.slices);
+// The pointer passes slices in reverse order, so putting the jackpot directly after
+// the winner makes the wheel roll over the jackpot one tick before it lands.
+function arrangeSlices(winner, nearMiss) {
+  const jackpot = state.slices.find((slice) => slice.kind === "jackpot");
+  const arranged = shuffle(state.slices.filter((slice) => slice !== jackpot));
+  const jackpotIndex = nearMiss
+    ? arranged.indexOf(winner) + 1
+    : Math.floor(Math.random() * (arranged.length + 1));
+
+  arranged.splice(jackpotIndex, 0, jackpot);
+  return arranged;
+}
+
+function showArcs(arcs) {
+  state.arcs = arcs;
+  state.slices = arcs.map((arc) => arc.slice);
   drawWheel();
+}
+
+function refreshWheel() {
+  showArcs(layoutArcs(buildSlices()));
 }
 
 // Drawing
@@ -420,21 +497,21 @@ function setRotation(rotation) {
   }
 }
 
-function pickWeightedArc() {
+function pickWeightedSlice() {
   const totalWeight = state.slices.reduce((sum, slice) => sum + slice.weight, 0);
   let roll = Math.random() * totalWeight;
 
-  return state.arcs.find((arc) => {
-    roll -= arc.slice.weight;
+  return state.slices.find((slice) => {
+    roll -= slice.weight;
     return roll <= 0;
-  }) ?? state.arcs[state.arcs.length - 1];
+  }) ?? state.slices[state.slices.length - 1];
 }
 
 // Rotating the wheel clockwise moves the pointer backwards through the angles,
 // so landing on angle A means the wheel must end at a rotation of -A, plus whole turns.
-function rotationToLand(arc, positionInArc) {
+function rotationToLand(arc, positionInArc, extraTurns) {
   const landingAngle = arc.start + (arc.end - arc.start) * positionInArc;
-  const minimum = state.rotation + SPIN_TURNS * TAU;
+  const minimum = state.rotation + extraTurns * TAU;
   return minimum + modulo(-landingAngle - minimum, TAU);
 }
 
@@ -458,8 +535,42 @@ function turnWheel(target, duration, easing) {
   });
 }
 
+function showFlash(text) {
+  els.flash.textContent = text;
+  els.flash.hidden = false;
+  els.flash
+    .animate(
+      [
+        { opacity: 0, transform: "translate(-50%, -50%) scale(0.3) rotate(-12deg)" },
+        { opacity: 1, transform: "translate(-50%, -50%) scale(1.1) rotate(-6deg)", offset: 0.2 },
+        { opacity: 1, transform: "translate(-50%, -50%) scale(1) rotate(-6deg)", offset: 0.8 },
+        { opacity: 0, transform: "translate(-50%, -50%) scale(1.3) rotate(-6deg)" }
+      ],
+      { duration: 1600, easing: "ease-out" }
+    )
+    .finished.then(() => {
+      els.flash.hidden = true;
+    });
+}
+
+// Stop dead on the jackpot, let it breathe, then creep one tick past it.
+async function teaseJackpot(arcs, winnerArc) {
+  const jackpotArc = arcs.find((arc) => arc.slice.kind === "jackpot");
+
+  await turnWheel(rotationToLand(jackpotArc, 0.6, SPIN_TURNS), SPIN_MS, easeOutCubic);
+  sounds.stopDrumroll();
+  setHostLine("tease");
+  await wait(TEASE_PAUSE_MS);
+
+  await turnWheel(rotationToLand(winnerArc, randomBetween(0.86, 0.94), 0), CREEP_MS, easeInOutSine);
+  sounds.soClose();
+  showFlash("So close!");
+  setHostLine("nearMiss");
+  await wait(NEAR_MISS_PAUSE_MS);
+}
+
 async function spin() {
-  if (state.spinning || state.pending) {
+  if (state.spinning || state.pending || lockRemaining() > 0) {
     return;
   }
 
@@ -469,19 +580,37 @@ async function spin() {
   els.wheelWrap.classList.add("is-spinning");
   sounds.startDrumroll();
 
-  const winner = pickWeightedArc();
-  await turnWheel(rotationToLand(winner, randomBetween(0.2, 0.8)), SPIN_MS, easeOutCubic);
+  const winner = pickWeightedSlice();
+  const nearMiss = winner.kind !== "jackpot" && Math.random() < NEAR_MISS_CHANCE;
+  const arcs = layoutArcs(arrangeSlices(winner, nearMiss));
+  const winnerArc = arcs.find((arc) => arc.slice === winner);
+
+  // The board reshuffles once the wheel is a blur, so the swap is never visible.
+  setTimeout(() => showArcs(arcs), RESHUFFLE_MS);
+
+  if (nearMiss) {
+    await teaseJackpot(arcs, winnerArc);
+  } else {
+    await turnWheel(rotationToLand(winnerArc, randomBetween(0.2, 0.8), SPIN_TURNS), SPIN_MS, easeOutCubic);
+  }
 
   sounds.stopDrumroll();
   els.wheelWrap.classList.remove("is-spinning");
   state.rotation = modulo(state.rotation, TAU);
   state.spinning = false;
 
-  announce(outcomeFor(winner.slice));
+  announce(outcomeFor(winner));
+}
+
+function lockRemaining() {
+  return Math.max(load("lockedUntil", 0) - Date.now(), 0);
 }
 
 function updateControls() {
-  els.spinButton.disabled = state.spinning || Boolean(state.pending);
+  const locked = lockRemaining();
+
+  els.spinButton.textContent = locked > 0 ? `Locked ${formatClock(locked)}` : "Spin";
+  els.spinButton.disabled = state.spinning || Boolean(state.pending) || locked > 0;
   els.mysteryToggle.disabled = state.spinning;
   els.moodButtons.forEach((button) => {
     button.disabled = state.spinning;
@@ -546,6 +675,13 @@ function celebrate(outcome) {
     return;
   }
 
+  if (outcome.kind === "jackpot") {
+    sounds.horn();
+    confetti.jackpot();
+    setHostLine("jackpot");
+    return;
+  }
+
   sounds.fanfare();
 
   if (outcome.categoryId === "reels") {
@@ -557,16 +693,36 @@ function celebrate(outcome) {
   setHostLine("win");
 }
 
+function resultKicker(outcome) {
+  if (KICKERS[outcome.kind]) {
+    return KICKERS[outcome.kind];
+  }
+
+  return state.mystery ? "The mystery is revealed" : "The wheel has spoken";
+}
+
+function actionsFor(outcome) {
+  const skip = { label: "Skipped", status: "skipped", style: "action-secondary" };
+
+  if (outcome.categoryId === "chaos") {
+    return [
+      { label: "It said yes", status: "done", style: "action-primary", effect: "spinAgain" },
+      { label: "It said no", status: "done", style: "action-primary", effect: "lockWheel" },
+      skip
+    ];
+  }
+
+  return [{ label: "Done", status: "done", style: "action-primary" }, skip];
+}
+
 function showResult(outcome) {
-  els.resultKicker.textContent = state.mystery ? "The mystery is revealed" : "The wheel has spoken";
+  els.resultKicker.textContent = resultKicker(outcome);
   els.resultIcon.textContent = outcome.icon;
-  els.resultCategory.textContent = outcome.categoryName;
+  els.resultCategory.textContent = outcome.kind === "jackpot" ? "Guilt free treat unlocked" : outcome.categoryName;
   els.resultTitle.textContent = outcome.text;
-  els.resultMinutes.textContent = outcome.minutes ? `${outcome.minutes} min` : "Guilt free";
-  renderActions([
-    { label: "Done", status: "done", style: "action-primary" },
-    { label: "Skipped", status: "skipped", style: "action-secondary" }
-  ]);
+  els.resultMinutes.textContent = outcome.minutes ? `${outcome.minutes} min` : "No timer";
+  els.result.dataset.kind = outcome.kind;
+  renderActions(actionsFor(outcome));
 
   els.result.hidden = false;
   updateControls();
@@ -574,19 +730,31 @@ function showResult(outcome) {
 }
 
 function renderActions(actions) {
-  const buttons = actions.map(({ label, status, style }) => {
+  const buttons = actions.map(({ label, status, style, effect }) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `action-button ${style}`;
     button.textContent = label;
-    button.addEventListener("click", () => settle(status));
+    button.addEventListener("click", () => settle(status, effect));
     return button;
   });
 
   els.resultActions.replaceChildren(...buttons);
 }
 
-function settle(status) {
+function applyEffect(effect) {
+  if (effect === "spinAgain") {
+    setHostLine("eightBallYes");
+    setTimeout(spin, EIGHT_BALL_RESPIN_MS);
+  }
+
+  if (effect === "lockWheel") {
+    save("lockedUntil", Date.now() + EIGHT_BALL_LOCK_MS);
+    setHostLine("eightBallNo");
+  }
+}
+
+function settle(status, effect) {
   const history = load("history", []);
   history.push({ ...state.pending, status, loggedAt: new Date().toISOString() });
   save("history", history.slice(-HISTORY_LIMIT));
@@ -600,6 +768,12 @@ function settle(status) {
   els.result.hidden = true;
   setHostLine(status);
   refreshWheel();
+
+  if (status === "done") {
+    confetti.burst({ count: 90, y: 0.6 });
+  }
+
+  applyEffect(effect);
   updateControls();
 }
 
@@ -746,6 +920,7 @@ function init() {
   refreshWheel();
   updateControls();
   bindControls();
+  setInterval(updateControls, 1000);
 
   // Canvas text does not repaint when web fonts arrive, so draw again once they do.
   document.fonts.ready.then(drawWheel);
