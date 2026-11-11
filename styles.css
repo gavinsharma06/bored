@@ -757,6 +757,59 @@ button:disabled {
   color: var(--text-dim);
 }
 
+.sync-form {
+  display: grid;
+  gap: 6px;
+}
+
+.field-label {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.text-field {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font: inherit;
+}
+
+.save-button {
+  justify-self: start;
+  min-height: 44px;
+  margin-top: 10px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.sync-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.forget-button {
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--danger);
+  font-weight: 600;
+}
+
 .toggle-group {
   margin: 0 0 16px;
   padding: 0;

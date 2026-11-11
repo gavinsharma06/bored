@@ -165,6 +165,11 @@ const els = {
   topTasks: document.getElementById("topTasks"),
   skippedTasks: document.getElementById("skippedTasks"),
   benchedTasks: document.getElementById("benchedTasks"),
+  syncForm: document.getElementById("syncForm"),
+  syncRepo: document.getElementById("syncRepo"),
+  syncToken: document.getElementById("syncToken"),
+  syncStatus: document.getElementById("syncStatus"),
+  syncForget: document.getElementById("syncForget"),
   jar: document.getElementById("jar"),
   jarFill: document.getElementById("jarFill"),
   jarCaption: document.getElementById("jarCaption")
@@ -997,6 +1002,7 @@ function applyEffect(effect) {
 
 function settle(status, effect) {
   logbook.record(state.pending.taskId ?? state.pending.kind, status);
+  syncHistory();
   state.pending = null;
   storage.save("pending", null);
   els.result.hidden = true;
@@ -1178,6 +1184,7 @@ function renderBenched() {
 
 function unbenchTask(taskId) {
   logbook.record(taskId, "unbenched");
+  syncHistory();
   setHostLine("unbenched");
   renderLearning();
 
@@ -1186,7 +1193,61 @@ function unbenchTask(taskId) {
   }
 }
 
+// History sync
+
+const SYNC_MESSAGES = {
+  off: "No token, so history stays on this device. Everything still works.",
+  queued: "Waiting to sync. Retries on the next load.",
+  synced: "Synced to history.json."
+};
+
+function renderSyncStatus() {
+  els.syncStatus.textContent = SYNC_MESSAGES[logbook.syncState()];
+}
+
+function renderSyncSettings() {
+  const { token, repo } = logbook.settings();
+  els.syncRepo.value = repo;
+  els.syncToken.value = "";
+  els.syncToken.placeholder = token ? "Token saved. Paste a new one to replace it." : "github_pat_…";
+  els.syncForget.hidden = !token;
+  renderSyncStatus();
+}
+
+async function syncHistory() {
+  await logbook.sync();
+  renderSyncStatus();
+}
+
+function saveSyncSettings(event) {
+  event.preventDefault();
+  const { token } = logbook.settings();
+
+  logbook.saveSettings({
+    repo: els.syncRepo.value.trim(),
+    token: els.syncToken.value.trim() || token
+  });
+  renderSyncSettings();
+  syncHistory();
+}
+
+function forgetSyncToken() {
+  logbook.forgetToken();
+  renderSyncSettings();
+}
+
+// Another device may have logged results, so the wheel and drawer redraw afterwards.
+async function catchUpHistory() {
+  await logbook.pullPublished();
+  await syncHistory();
+
+  if (!state.spinning) {
+    refreshWheel();
+  }
+}
+
 function openDrawer() {
+  renderSyncSettings();
   renderTaskToggles();
   renderLearning();
   renderHistory();
@@ -1209,6 +1270,8 @@ function bindControls() {
   els.settingsButton.addEventListener("click", openDrawer);
   els.drawerClose.addEventListener("click", closeDrawer);
   els.drawerBackdrop.addEventListener("click", closeDrawer);
+  els.syncForm.addEventListener("submit", saveSyncSettings);
+  els.syncForget.addEventListener("click", forgetSyncToken);
   els.moodButtons.forEach((button) => {
     button.addEventListener("click", () => setMood(button.dataset.mood));
   });
@@ -1238,6 +1301,8 @@ function init() {
   if (state.pending) {
     showResult(state.pending);
   }
+
+  catchUpHistory();
 }
 
 init();

@@ -99,6 +99,26 @@
     </header>
 
     <section class="drawer-section">
+      <h3>Sync</h3>
+      <p class="drawer-note">
+        Optional. A fine grained GitHub token for this repo only, with Contents
+        read and write, lets every Done and Skip land in history.json. It stays
+        in this browser's localStorage and is never committed.
+      </p>
+      <form class="sync-form" id="syncForm" autocomplete="off">
+        <label class="field-label" for="syncRepo">Repository</label>
+        <input class="text-field" id="syncRepo" type="text" placeholder="owner/repo" spellcheck="false">
+        <label class="field-label" for="syncToken">Token</label>
+        <input class="text-field" id="syncToken" type="password" spellcheck="false">
+        <button class="save-button" type="submit">Save</button>
+      </form>
+      <div class="sync-row">
+        <span id="syncStatus"></span>
+        <button class="forget-button" id="syncForget" type="button">Forget token</button>
+      </div>
+    </section>
+
+    <section class="drawer-section">
       <h3>On the wheel</h3>
       <p class="drawer-note">Untick anything you never want to land on.</p>
       <div id="taskToggles"></div>
