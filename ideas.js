@@ -69,5 +69,5 @@ const ideas = (() => {
     return tasks;
   }
 
-  return { fetchIdeas, apply };
+  return { fetchIdeas, apply, isTask };
 })();

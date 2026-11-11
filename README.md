@@ -35,6 +35,7 @@ The app never writes `ideas.json`, so whatever writes it can never collide with 
 - Every Done raises a task's weight by 0.15, every Skip lowers it, held between 0.35 and 2.
 - 10 Skips in a row benches a task. It leaves the wheel and shows up under
   Benched in the drawer, where Unbench brings it back. One Done resets the streak.
+- New tasks, and smaller rewrites of benched tasks, arrive through `ideas.json`.
 
 ## Syncing history (optional)
 
@@ -43,3 +44,9 @@ calls. To sync, create a fine grained GitHub token limited to this repository
 with **Contents: Read and write**, then paste it into the drawer's Sync section.
 The token lives only in that browser's localStorage. Failed syncs retry on the
 next load.
+
+## The forge report
+
+`node scripts/forge-report.mjs` loads the app's own `tasks.js`, `ideas.js`, and
+`history.js` and prints which tasks are benched, how each category is doing, and
+any entries in `ideas.json` the wheel would reject.

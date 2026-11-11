@@ -15,7 +15,6 @@ const NEAR_MISS_PAUSE_MS = 900;
 const EIGHT_BALL_LOCK_MS = 10 * 60 * 1000;
 const EIGHT_BALL_RESPIN_MS = 1400;
 const HISTORY_SHOWN = 30;
-const BENCH_STREAK = 10;
 const REELS_DAILY_MINUTES = 60;
 const NEGLECT_STEP = 0.25;
 const LEARNING_STEP = 0.15;
@@ -365,7 +364,7 @@ function taskStats() {
 
 function benchedTasks() {
   const streaks = logbook.skipStreaks();
-  return state.tasks.filter((task) => (streaks.get(task.id) ?? 0) >= BENCH_STREAK);
+  return state.tasks.filter((task) => (streaks.get(task.id) ?? 0) >= logbook.BENCH_STREAK);
 }
 
 // Every Done nudges a task up and every Skip nudges it down, within a floor and a
@@ -1175,7 +1174,7 @@ function renderBenchedEntry(task) {
 
 function renderBenched() {
   const entries = benchedTasks().map(renderBenchedEntry);
-  renderRankList(els.benchedTasks, entries, `Skip a task ${BENCH_STREAK} times in a row and it sits out here.`);
+  renderRankList(els.benchedTasks, entries, `Skip a task ${logbook.BENCH_STREAK} times in a row and it sits out here.`);
 }
 
 function unbenchTask(taskId) {

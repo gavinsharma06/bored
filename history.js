@@ -2,6 +2,7 @@
 // { taskId, result, date }, because they end up in a public repo.
 const logbook = (() => {
   const LIMIT = 2000;
+  const BENCH_STREAK = 10;
   const RESULTS = ["done", "skipped", "unbenched"];
   const FILE = "history.json";
   const GITHUB_API = "https://api.github.com";
@@ -239,6 +240,7 @@ const logbook = (() => {
   }
 
   return {
+    BENCH_STREAK,
     entries,
     merge,
     replace,
